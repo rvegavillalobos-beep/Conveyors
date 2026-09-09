@@ -1,5 +1,6 @@
 import cv2
 import numpy as np
+import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 from PIL import Image
@@ -7,7 +8,7 @@ from PIL import Image
 st.set_page_config(layout="wide", page_title="Lector y Reconstructor de Layout CAD")
 
 st.title("Reconstructor Automático de Layouts CAD")
-st.write("Carga la imagen de tu layout con marcadores de color para generar automáticamente el mapa interactivo vectorizado.")
+st.write("Carga la imagen de tu layout para vectorizar las formas (sin relleno) y obtener el inventario automático.")
 
 # ==========================================
 # 1. EXPLORADOR DE ARCHIVOS (FILE UPLOADER)
@@ -70,7 +71,7 @@ if uploaded_file is not None:
             if area > 15: # Filtro de ruido
                 x, y, w, h = cv2.boundingRect(cnt)
                 
-                # Convertir origen Y a sistema cartesiano (inferior izquierdo)
+                # Convertir origen Y a sistema cartesiano
                 y_cartesian = height - y 
                 elem_id = f"{label}_{count}"
                 
@@ -87,31 +88,34 @@ if uploaded_file is not None:
                 count += 1
 
     # ==========================================
-    # 4. GENERACIÓN DE LA GRÁFICA VECTORIAL
+    # 4. GENERACIÓN DE LA GRÁFICA (SIN RELLENO)
     # ==========================================
     fig = go.Figure()
     shapes = []
 
     for elem_id, elem in detected_elements.items():
+        # Relleno 100% transparente para distinguir mejor las líneas/fondos
+        transparent_fill = "rgba(0, 0, 0, 0)"
+
         if elem["shape"] == "circle":
             r = max(elem["w"], elem["h"]) / 2.0
             shapes.append(dict(
                 type="circle", xref="x", yref="y",
                 x0=elem["x"] - r, y0=elem["y"] - r,
                 x1=elem["x"] + r, y1=elem["y"] + r,
-                line=dict(color=elem["color"], width=2),
-                fillcolor="rgba(0,0,0,0)"
+                line=dict(color=elem["color"], width=3),
+                fillcolor=transparent_fill
             ))
         else:
             shapes.append(dict(
                 type="rect", xref="x", yref="y",
                 x0=elem["x"] - elem["w"] / 2.0, y0=elem["y"] - elem["h"] / 2.0,
                 x1=elem["x"] + elem["w"] / 2.0, y1=elem["y"] + elem["h"] / 2.0,
-                line=dict(color=elem["color"], width=2),
-                fillcolor=elem["color"]
+                line=dict(color=elem["color"], width=3),
+                fillcolor=transparent_fill
             ))
 
-        # Marcadores interactivos para Hover y Selección
+        # Marcadores interactivos para Hover/Clics
         fig.add_trace(go.Scatter(
             x=[elem["x"]], y=[elem["y"]],
             mode="markers",
@@ -128,42 +132,54 @@ if uploaded_file is not None:
         paper_bgcolor="white",
         margin=dict(l=10, r=10, t=10, b=10),
         showlegend=False,
-        height=650
+        height=680
     )
 
     # ==========================================
-    # 5. DESPLIEGUE EN LA INTERFAZ
+    # 5. TABLA Y MÉTRICAS DE CONTEO
     # ==========================================
-    st.success(f"Detección completada: Se encontraron {len(detected_elements)} elementos automáticamente.")
+    counts_by_label = {}
+    for elem in detected_elements.values():
+        lbl = elem["label"]
+        counts_by_label[lbl] = counts_by_label.get(lbl, 0) + 1
 
+    df_summary = pd.DataFrame(
+        list(counts_by_label.items()), 
+        columns=["Tipo de Elemento", "Cantidad"]
+    ).sort_values(by="Cantidad", ascending=False)
+
+    total_count = len(detected_elements)
+
+    # ==========================================
+    # 6. DESPLIEGUE EN LA INTERFAZ
+    # ==========================================
     col_map, col_panel = st.columns([7, 3])
 
     with col_map:
         st.plotly_chart(fig, use_container_width=True)
 
     with col_panel:
-        st.subheader("Panel de Inspección")
+        st.subheader("Resumen de Componentes")
         
+        # Métrica global
+        st.metric("Total de Elementos Detectados", total_count)
+        
+        # Tabla detallada por tipo
+        st.write("### Conteo por Categoría")
+        st.dataframe(df_summary, use_container_width=True, hide_index=True)
+
+        st.divider()
+
+        # Inspección individual
         if detected_elements:
-            selected_id = st.selectbox("Selecciona un elemento detectado:", list(detected_elements.keys()))
-            
+            st.write("### Inspección Individual")
+            selected_id = st.selectbox("Seleccionar elemento:", list(detected_elements.keys()))
             if selected_id:
                 item = detected_elements[selected_id]
-                st.markdown(f"### `{selected_id}`")
+                st.markdown(f"**ID:** `{selected_id}`")
                 st.write(f"**Categoría:** {item['label']}")
-                st.write(f"**Centro (X, Y):** ({item['x']:.1f}, {item['y']:.1f})")
-                st.write(f"**Ancho:** {item['w']} px | **Alto:** {item['h']} px")
-                st.divider()
-                
-                # Telemetría de ejemplo
-                if item["shape"] == "circle":
-                    st.metric("Velocidad de Giro", "1.2 m/s")
-                    st.metric("Estado", "Operativo")
-                else:
-                    st.metric("Estado de Línea", "Activo")
-                    st.metric("Carga Detectada", " Normal")
-        else:
-            st.warning("No se detectaron formas con los rangos de color predeterminados.")
+                st.write(f"**Centro X, Y:** ({item['x']:.1f}, {item['y']:.1f})")
+                st.write(f"**Ancho x Alto:** {item['w']}px x {item['h']}px")
 
 else:
     st.info("Por favor, sube una imagen de layout para comenzar el procesamiento.")
