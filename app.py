@@ -75,7 +75,7 @@ width = 0.65
 # --- TOP CHART: PRIMARY AXIS (TROLLEYS BARS) ---
 ax1.bar(x, df["Operational"], width, label='Operational Available Trolleys', color='#1F4E79')
 ax1.bar(x, df["Physical"] - df["Operational"], width, bottom=df["Operational"], 
-        label='Pending Adjustment', color='#D9E1F2', alpha=0.8)
+        label='Trolley Pending of Adjustment', color='#D9E1F2', alpha=0.8)
 
 ax1.set_ylabel('Available Trolleys', fontsize=11, fontweight='bold', color='#1F4E79')
 ax1.set_title('Trolley Availability & Trolley Capacity vs. Production Demand (Up to CW8)', fontsize=13, fontweight='bold', pad=15, color='#1F4E79')
