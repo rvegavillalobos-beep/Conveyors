@@ -6,15 +6,15 @@ import numpy as np
 st.set_page_config(page_title="Trolley Availability & Trolley Capacity Ramp-Up", layout="wide")
 
 st.title("📦 Trolley Availability & Trolley Capacity vs. Production Demand")
-st.markdown("Simulación interactiva de disponibilidad y capacidad de trolleys basada en la tasa de ajuste mecánico y parámetros configurables.")
+st.markdown("Interactive simulation of trolley availability and trolley-based capacity constrained by the mechanical adjustment rate (Paused during CW52 & CW1 Shutdown).")
 
-# --- SIDEBAR CONTROLS (Interactividad) ---
-st.sidebar.header("⚙️ Parámetros de Simulación")
-adjustment_rate = st.sidebar.slider("Tasa de Ajuste Mecánico (unidades/semana)", min_value=1, max_value=5, value=2, step=1)
-target_trolleys_for_30_uph = st.sidebar.slider("Trolleys necesarios para 30 UPH", min_value=60, max_value=120, value=90, step=5)
-base_fleet = st.sidebar.number_input("Flota Base Inicial", min_value=20, max_value=60, value=35, step=5)
-batch1_qty = st.sidebar.number_input("Cantidad Batch 1 (CW1)", min_value=10, max_value=50, value=24, step=2)
-batch2_qty = st.sidebar.number_input("Cantidad Batch 2 (CW8)", min_value=10, max_value=60, value=30, step=2)
+# --- SIDEBAR CONTROLS (Interactivity) ---
+st.sidebar.header("⚙️ Simulation Parameters")
+adjustment_rate = st.sidebar.slider("Mechanical Adjustment Rate (units/week)", min_value=1, max_value=10, value=2, step=1)
+target_trolleys_for_30_uph = st.sidebar.slider("Trolleys required for 30 UPH", min_value=60, max_value=200, value=90, step=5)
+base_fleet = st.sidebar.number_input("Base Fleet Initial", min_value=20, max_value=60, value=35, step=5)
+batch1_qty = st.sidebar.number_input("Batch 1 Quantity (CW1)", min_value=10, max_value=50, value=24, step=2)
+batch2_qty = st.sidebar.number_input("Batch 2 Quantity (CW8)", min_value=10, max_value=60, value=30, step=2)
 
 # 1. Timeline Setup: Extended to CW13
 weeks = [f"CW{i}" for i in range(46, 53)] + [f"CW{i}" for i in range(1, 14)]
@@ -36,7 +36,7 @@ for idx, w in enumerate(weeks):
         
     phys_stock.append(current_physical)
     
-    # Mechanical adjustment logic: 2 units/week, paused during Shutdown (CW52 and CW1)
+    # Mechanical adjustment logic: paused during Shutdown (CW52 and CW1)
     is_shutdown = (weeks[idx] in ["CW52", "CW1"])
     
     if not is_shutdown and current_operational < current_physical:
@@ -85,8 +85,9 @@ ax1.spines['left'].set_color('#BFBFBF')
 ax1.spines['bottom'].set_color('#BFBFBF')
 ax1.grid(axis='y', linestyle='--', alpha=0.4)
 
-ax1.set_ylim(0, max(df["Physical"]) + 15)
-ax1.set_yticks(range(0, int(max(df["Physical"]) + 15), 10))
+max_limit = max(df["Physical"]) + 15
+ax1.set_ylim(0, max_limit)
+ax1.set_yticks(range(0, int(max_limit) + 1, 15))
 
 # Annotate trolley numbers on top of bars
 for i, v in enumerate(df["Operational"]):
