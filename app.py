@@ -5,8 +5,8 @@ import numpy as np
 
 st.set_page_config(page_title="Trolley Availability & Trolley Capacity Ramp-Up", layout="wide")
 
-st.title("📦 Trolley Availability & Trolley Capacity vs. Production Demand")
-st.markdown("Interactive simulation of trolley availability and trolley-based capacity constrained by the mechanical adjustment rate (Paused during CW52 & CW1 Shutdown).")
+st.title("")
+
 
 # --- SIDEBAR CONTROLS (Interactivity) ---
 st.sidebar.header("⚙️ Simulation Parameters")
