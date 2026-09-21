@@ -63,6 +63,9 @@ df = pd.DataFrame({
     "Prod_UPH_Demand": production_uph_demand
 })
 
+# Índice para CW8 en nuestra lista 'weeks' (CW46=0 ... CW8 se encuentra en el índice donde weeks[i] == 'CW8')
+cw8_index = weeks.index("CW8")
+
 # 4. Professional Matplotlib Figure with Dual Axes
 fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 6.5), gridspec_kw={'height_ratios': [3, 0.7], 'hspace': 0.05}, sharex=True)
 
@@ -130,7 +133,6 @@ ax1.legend(lines_1 + lines_2, labels_1 + labels_2, frameon=False, loc='upper lef
 
 
 # --- BOTTOM TRACKER: TIMELINE MILESTONES (Batch and Customs only) ---
-# Rotated vertical label matching your layout reference exactly
 ax2.set_ylabel('Additional Shipments', fontsize=10, fontweight='bold', color='#1F4E79', rotation=90, labelpad=20, va='center')
 
 # Row 1: Batch 1
@@ -167,8 +169,8 @@ col1, col2, col3, col4 = st.columns(4)
 with col1:
     st.metric(label="Base Fleet", value=f"{base_fleet} Units")
 with col2:
-    st.metric(label="Max Operational (CW13)", value=f"{op_stock[-1]} Units")
+    st.metric(label="Max Operational (CW8)", value=f"{op_stock[cw8_index]} Units")
 with col3:
-    st.metric(label="Trolley Capacity at CW13", value=f"{uph_capacity[-1]} UPH")
+    st.metric(label="Trolley Capacity at CW8", value=f"{uph_capacity[cw8_index]} UPH")
 with col4:
     st.metric(label="Adjustment Rate", value=f"{adjustment_rate} u/wk")
