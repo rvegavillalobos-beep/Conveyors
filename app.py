@@ -164,16 +164,5 @@ with col4:
 
 st.markdown("---")
 
-# --- INFORMATIVE TROLLEY TABLE (AT THE VERY BOTTOM) ---
-st.markdown("#### Number of Outfeed and Infeed trolleys")
-
-trolley_data = {
-    "Project / Line": ["BP10 USA", "BP15 DEB (15.01 + 15.02)", "BP2 ISK* (02.01 + 02.02)", "BP19 CHN** (19.01 + 19.02 + 19.03)", "BP30 SLP"],
-    "UPH": ["30", "15+30", "30+15", "15+15+30", "20"],
-    "Amount": ["94", "150", "126", "(155) 107", "90"]
-}
-
-df_trolleys = pd.DataFrame(trolley_data)
-st.table(df_trolleys)
-
-st.markdown("<small>* = Status April 2026<br>** = in grey deactivated line 19.01</small>", unsafe_allow_html=True)
+# --- INFORMATIVE TROLLEY IMAGE AT THE VERY BOTTOM ---
+st.image("table.jpg", use_container_width=True)
