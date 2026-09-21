@@ -5,9 +5,6 @@ import numpy as np
 
 st.set_page_config(page_title="Trolley Availability & Trolley Capacity Ramp-Up", layout="wide")
 
-st.title("")
-
-
 # --- SIDEBAR CONTROLS (Interactivity) ---
 st.sidebar.header("⚙️ Simulation Parameters")
 adjustment_rate = st.sidebar.slider("Mechanical Adjustment Rate (units/week)", min_value=1, max_value=10, value=2, step=1)
@@ -63,7 +60,6 @@ df = pd.DataFrame({
     "Prod_UPH_Demand": production_uph_demand
 })
 
-# Índice para CW8 en nuestra lista 'weeks' (CW46=0 ... CW8 se encuentra en el índice donde weeks[i] == 'CW8')
 cw8_index = weeks.index("CW8")
 
 # 4. Professional Matplotlib Figure with Dual Axes
@@ -75,7 +71,7 @@ width = 0.65
 # --- TOP CHART: PRIMARY AXIS (TROLLEYS BARS) ---
 ax1.bar(x, df["Operational"], width, label='Operational Available Trolleys', color='#1F4E79')
 ax1.bar(x, df["Physical"] - df["Operational"], width, bottom=df["Operational"], 
-        label='Trolley Pending of Adjustment', color='#D9E1F2', alpha=0.8)
+        label='Pending Adjustment', color='#D9E1F2', alpha=0.8)
 
 ax1.set_ylabel('Available Trolleys', fontsize=11, fontweight='bold', color='#1F4E79')
 ax1.set_title('Trolley Availability & Trolley Capacity vs. Production Demand (Up to CW8)', fontsize=13, fontweight='bold', pad=15, color='#1F4E79')
@@ -92,25 +88,21 @@ max_limit = max(df["Physical"]) + 15
 ax1.set_ylim(0, max_limit)
 ax1.set_yticks(range(0, int(max_limit) + 1, 15))
 
-# Annotate trolley numbers on top of bars
 for i, v in enumerate(df["Operational"]):
     ax1.text(i, v + 0.8, str(v), ha='center', va='bottom', fontsize=7.5, fontweight='semibold', color='#333333')
 
 
 # --- TOP CHART: SECONDARY AXIS (TROLLEY CAPACITY LINE & PRODUCTION DEMAND LINE) ---
 coral_color = '#D96852'
-prod_line_color = '#27AE60'  # Green line for production UPH demand
+prod_line_color = '#27AE60'
 
 ax_uph = ax1.twinx()
 
-# Line 1: Trolley-Based Capacity (UPH)
 ax_uph.plot(x, df["UPH_Capacity"], color=coral_color, marker='o', linewidth=2.0, markersize=4.5, label='Trolley-Based Capacity (UPH)')
 
-# Annotate UPH values tightly below each point on the orange line
 for i, uph in enumerate(df["UPH_Capacity"]):
     ax_uph.text(i, uph - 0.8, f"{uph}", ha='center', va='top', fontsize=6.5, fontweight='bold', color=coral_color)
 
-# Line 2: Production Demand (UPH)
 ax_uph.plot(x, df["Prod_UPH_Demand"], color=prod_line_color, marker='s', linewidth=2.2, markersize=5, label='Production Demand (UPH)')
 
 ax_uph.set_ylabel('Trolley Capacity & Demand (UPH)', fontsize=11, fontweight='bold', color=coral_color)
@@ -121,35 +113,30 @@ ax_uph.spines['left'].set_visible(False)
 ax_uph.spines['right'].set_color(coral_color)
 ax_uph.grid(False)
 
-# Annotate Production UPH values near markers up to CW8
 for i, val in enumerate(df["Prod_UPH_Demand"]):
     if val is not None and val > 0:
         ax_uph.text(i, val + 1.2, f"{val}", ha='center', va='bottom', fontsize=6.5, fontweight='bold', color=prod_line_color)
 
-# Combine legends cleanly on top left
 lines_1, labels_1 = ax1.get_legend_handles_labels()
 lines_2, labels_2 = ax_uph.get_legend_handles_labels()
 ax1.legend(lines_1 + lines_2, labels_1 + labels_2, frameon=False, loc='upper left', fontsize=8.5)
 
 
-# --- BOTTOM TRACKER: TIMELINE MILESTONES (Batch and Customs only) ---
+# --- BOTTOM TRACKER: TIMELINE MILESTONES ---
 ax2.set_ylabel('Additional Shipments', fontsize=10, fontweight='bold', color='#1F4E79', rotation=90, labelpad=20, va='center')
 
-# Row 1: Batch 1
 ax2.barh(y=1, width=4, left=1, height=0.5, color='#FFF2CC', edgecolor='#D6B656', hatch='//')
 ax2.text(3, 1, f'BATCH 1 Shipment +{batch1_qty}', ha='center', va='center', fontsize=7.5, fontweight='bold', color='#7F6000')
 
 ax2.barh(y=1, width=2, left=5, height=0.5, color='#FFE599', edgecolor='#D6B656')
 ax2.text(6, 1, 'CUSTOMS', ha='center', va='center', fontsize=7, fontweight='bold', color='#7F6000')
 
-# Row 2: Batch 2
 ax2.barh(y=0, width=4, left=8, height=0.5, color='#FFF2CC', edgecolor='#D6B656', hatch='//')
 ax2.text(10, 0, f'BATCH 2 Shipment +{batch2_qty}', ha='center', va='center', fontsize=7.5, fontweight='bold', color='#7F6000')
 
 ax2.barh(y=0, width=2, left=12, height=0.5, color='#FFE599', edgecolor='#D6B656')
 ax2.text(13, 0, 'CUSTOMS', ha='center', va='center', fontsize=7, fontweight='bold', color='#7F6000')
 
-# Styling bottom timeline tracker
 ax2.set_yticks([])
 ax2.set_xlim(-0.5, n_weeks - 0.5)
 ax2.set_ylim(-0.5, 1.5)
@@ -174,3 +161,19 @@ with col3:
     st.metric(label="Trolley Capacity at CW8", value=f"{uph_capacity[cw8_index]} UPH")
 with col4:
     st.metric(label="Adjustment Rate", value=f"{adjustment_rate} u/wk")
+
+st.markdown("---")
+
+# --- INFORMATIVE TROLLEY TABLE (AT THE VERY BOTTOM) ---
+st.markdown("#### Number of Outfeed and Infeed trolleys")
+
+trolley_data = {
+    "Project / Line": ["BP10 USA", "BP15 DEB (15.01 + 15.02)", "BP2 ISK* (02.01 + 02.02)", "BP19 CHN** (19.01 + 19.02 + 19.03)", "BP30 SLP"],
+    "UPH": ["30", "15+30", "30+15", "15+15+30", "20"],
+    "Amount": ["94", "150", "126", "(155) 107", "90"]
+}
+
+df_trolleys = pd.DataFrame(trolley_data)
+st.table(df_trolleys)
+
+st.markdown("<small>* = Status April 2026<br>** = in grey deactivated line 19.01</small>", unsafe_allow_html=True)
