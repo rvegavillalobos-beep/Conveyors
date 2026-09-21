@@ -1,185 +1,164 @@
-import cv2
-import numpy as np
-import pandas as pd
-import plotly.graph_objects as go
 import streamlit as st
-from PIL import Image
+import pandas as pd
+import matplotlib.pyplot as plt
+import numpy as np
 
-st.set_page_config(layout="wide", page_title="Lector y Reconstructor de Layout CAD")
+st.set_page_config(page_title="Trolley Availability & Line Capacity Ramp-Up", layout="wide")
 
-st.title("Reconstructor Automático de Layouts CAD")
-st.write("Carga la imagen de tu layout para vectorizar las formas (sin relleno) y obtener el inventario automático.")
+st.title("📦 Trolley Availability & Trolley Capacity vs. Production Demand")
+st.markdown("Simulación interactiva de disponibilidad y capacidad de trolleys basada en la tasa de ajuste mecánico y parámetros configurables.")
 
-# ==========================================
-# 1. EXPLORADOR DE ARCHIVOS (FILE UPLOADER)
-# ==========================================
-uploaded_file = st.file_uploader(
-    "Selecciona la imagen de tu layout (PNG, JPG, JPEG):", 
-    type=["png", "jpg", "jpeg"]
-)
+# --- SIDEBAR CONTROLS (Interactividad) ---
+st.sidebar.header("⚙️ Parámetros de Simulación")
+adjustment_rate = st.sidebar.slider("Tasa de Ajuste Mecánico (unidades/semana)", min_value=1, max_value=5, value=2, step=1)
+target_trolleys_for_30_uph = st.sidebar.slider("Trolleys necesarios para 30 UPH", min_value=60, max_value=120, value=90, step=5)
+base_fleet = st.sidebar.number_input("Flota Base Inicial", min_value=20, max_value=60, value=35, step=5)
+batch1_qty = st.sidebar.number_input("Cantidad Batch 1 (CW1)", min_value=10, max_value=50, value=24, step=2)
+batch2_qty = st.sidebar.number_input("Cantidad Batch 2 (CW8)", min_value=10, max_value=60, value=30, step=2)
 
-if uploaded_file is not None:
-    # Cargar y convertir imagen para OpenCV
-    image = Image.open(uploaded_file).convert("RGB")
-    img_np = np.array(image)
-    img_bgr = cv2.cvtColor(img_np, cv2.COLOR_RGB2BGR)
-    hsv = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2HSV)
-    height, width, _ = img_np.shape
+# 1. Timeline Setup: Extended to CW13
+weeks = [f"CW{i}" for i in range(46, 53)] + [f"CW{i}" for i in range(1, 14)]
+n_weeks = len(weeks)
 
-    # ==========================================
-    # 2. CONFIGURACIÓN DE RANGOS HSV POR COLOR
-    # ==========================================
-    color_ranges = {
-        "TV_TurningTable": {
-            "lower": np.array([5, 120, 120]), "upper": np.array([25, 255, 255]),
-            "color": "#E67E22", "shape": "circle", "label": "TV - Turning Table"
-        },
-        "TL_Longitudinal": {
-            "lower": np.array([95, 120, 120]), "upper": np.array([125, 255, 255]),
-            "color": "#1F77B4", "shape": "rect", "label": "TL - Longitudinal Conveyor"
-        },
-        "TV_IndexingTable": {
-            "lower": np.array([0, 120, 120]), "upper": np.array([10, 255, 255]),
-            "color": "#D62728", "shape": "rect", "label": "TV - Indexing Table"
-        },
-        "TU_CornerConverter": {
-            "lower": np.array([100, 120, 30]), "upper": np.array([120, 255, 120]),
-            "color": "#0B3C5D", "shape": "rect", "label": "TU - Corner Converter"
-        },
-        "LiftingDoor": {
-            "lower": np.array([20, 120, 120]), "upper": np.array([35, 255, 255]),
-            "color": "#D4AC0D", "shape": "rect", "label": "Lifting Conveyor / Door"
-        },
-        "Lifter": {
-            "lower": np.array([0, 0, 0]), "upper": np.array([180, 255, 40]),
-            "color": "#1C2833", "shape": "rect", "label": "LIFTER"
-        }
-    }
+# 2. Simulation Logic with Interactive Variables
+current_physical = base_fleet
+current_operational = base_fleet
 
-    # ==========================================
-    # 3. DETECCIÓN AUTOMÁTICA CON OPENCV
-    # ==========================================
-    detected_elements = {}
+phys_stock = []
+op_stock = []
+uph_capacity = []
 
-    for label, config in color_ranges.items():
-        mask = cv2.inRange(hsv, config["lower"], config["upper"])
-        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+for idx, w in enumerate(weeks):
+    if idx == 7:  # Starting CW1
+        current_physical += batch1_qty
+    if idx == 14: # Starting CW8
+        current_physical += batch2_qty
         
-        count = 1
-        for cnt in contours:
-            area = cv2.contourArea(cnt)
-            if area > 15: # Filtro de ruido
-                x, y, w, h = cv2.boundingRect(cnt)
-                
-                # Convertir origen Y a sistema cartesiano
-                y_cartesian = height - y 
-                elem_id = f"{label}_{count}"
-                
-                detected_elements[elem_id] = {
-                    "type": label,
-                    "label": config["label"],
-                    "x": x + w / 2.0,
-                    "y": y_cartesian - h / 2.0,
-                    "w": w,
-                    "h": h,
-                    "color": config["color"],
-                    "shape": config["shape"]
-                }
-                count += 1
-
-    # ==========================================
-    # 4. GENERACIÓN DE LA GRÁFICA (SIN RELLENO)
-    # ==========================================
-    fig = go.Figure()
-    shapes = []
-
-    for elem_id, elem in detected_elements.items():
-        # Relleno 100% transparente para distinguir mejor las líneas/fondos
-        transparent_fill = "rgba(0, 0, 0, 0)"
-
-        if elem["shape"] == "circle":
-            r = max(elem["w"], elem["h"]) / 2.0
-            shapes.append(dict(
-                type="circle", xref="x", yref="y",
-                x0=elem["x"] - r, y0=elem["y"] - r,
-                x1=elem["x"] + r, y1=elem["y"] + r,
-                line=dict(color=elem["color"], width=3),
-                fillcolor=transparent_fill
-            ))
-        else:
-            shapes.append(dict(
-                type="rect", xref="x", yref="y",
-                x0=elem["x"] - elem["w"] / 2.0, y0=elem["y"] - elem["h"] / 2.0,
-                x1=elem["x"] + elem["w"] / 2.0, y1=elem["y"] + elem["h"] / 2.0,
-                line=dict(color=elem["color"], width=3),
-                fillcolor=transparent_fill
-            ))
-
-        # Marcadores interactivos para Hover/Clics
-        fig.add_trace(go.Scatter(
-            x=[elem["x"]], y=[elem["y"]],
-            mode="markers",
-            marker=dict(size=12, color="rgba(0,0,0,0)"),
-            name=elem_id,
-            hovertemplate=f"<b>{elem_id}</b><br>Tipo: {elem['label']}<br>Dimensiones: {elem['w']}px x {elem['h']}px<extra></extra>"
-        ))
-
-    fig.update_layout(
-        shapes=shapes,
-        xaxis=dict(visible=False, range=[0, width]),
-        yaxis=dict(visible=False, range=[0, height], scaleanchor="x", scaleratio=1),
-        plot_bgcolor="white",
-        paper_bgcolor="white",
-        margin=dict(l=10, r=10, t=10, b=10),
-        showlegend=False,
-        height=680
-    )
-
-    # ==========================================
-    # 5. TABLA Y MÉTRICAS DE CONTEO
-    # ==========================================
-    counts_by_label = {}
-    for elem in detected_elements.values():
-        lbl = elem["label"]
-        counts_by_label[lbl] = counts_by_label.get(lbl, 0) + 1
-
-    df_summary = pd.DataFrame(
-        list(counts_by_label.items()), 
-        columns=["Tipo de Elemento", "Cantidad"]
-    ).sort_values(by="Cantidad", ascending=False)
-
-    total_count = len(detected_elements)
-
-    # ==========================================
-    # 6. DESPLIEGUE EN LA INTERFAZ
-    # ==========================================
-    col_map, col_panel = st.columns([7, 3])
-
-    with col_map:
-        st.plotly_chart(fig, use_container_width=True)
-
-    with col_panel:
-        st.subheader("Resumen de Componentes")
+    phys_stock.append(current_physical)
+    
+    # Mechanical adjustment logic: paused during Shutdown (CW52 and CW1)
+    is_shutdown = (weeks[idx] in ["CW52", "CW1"])
+    
+    if not is_shutdown and current_operational < current_physical:
+        current_operational = min(current_physical, current_operational + adjustment_rate)
         
-        # Métrica global
-        st.metric("Total de Elementos Detectados", total_count)
-        
-        # Tabla detallada por tipo
-        st.write("### Conteo por Categoría")
-        st.dataframe(df_summary, use_container_width=True, hide_index=True)
+    op_stock.append(current_operational)
+    
+    # Calculate available capacity based on dynamic ratio
+    calculated_uph = round((current_operational / float(target_trolleys_for_30_uph)) * 30, 1)
+    uph_capacity.append(calculated_uph)
 
-        st.divider()
+# 3. Weekly Production Data Converted to UPH (45 hrs/week: 5 days * 9 hours)
+raw_production_up_to_cw8 = [49, 69, 123, 147, 184, 196, 0, 0, 176, 199, 223, 246, 206, 270, 281]
+production_uph_demand = [round(p / 45.0, 1) if p > 0 else 0.0 for p in raw_production_up_to_cw8]
 
-        # Inspección individual
-        if detected_elements:
-            st.write("### Inspección Individual")
-            selected_id = st.selectbox("Seleccionar elemento:", list(detected_elements.keys()))
-            if selected_id:
-                item = detected_elements[selected_id]
-                st.markdown(f"**ID:** `{selected_id}`")
-                st.write(f"**Categoría:** {item['label']}")
-                st.write(f"**Centro X, Y:** ({item['x']:.1f}, {item['y']:.1f})")
-                st.write(f"**Ancho x Alto:** {item['w']}px x {item['h']}px")
+while len(production_uph_demand) < n_weeks:
+    production_uph_demand.append(None)
 
-else:
-    st.info("Por favor, sube una imagen de layout para comenzar el procesamiento.")
+df = pd.DataFrame({
+    "Week": weeks,
+    "Physical": phys_stock,
+    "Operational": op_stock,
+    "UPH_Capacity": uph_capacity,
+    "Prod_UPH_Demand": production_uph_demand
+})
+
+# 4. Professional Matplotlib Figure with Dual Axes
+fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 6.5), gridspec_kw={'height_ratios': [3, 0.7], 'hspace': 0.05}, sharex=True)
+
+x = np.arange(n_weeks)
+width = 0.65
+
+# --- TOP CHART: PRIMARY AXIS (TROLLEYS BARS) ---
+ax1.bar(x, df["Operational"], width, label='Operational Available Trolleys', color='#1F4E79')
+ax1.bar(x, df["Physical"] - df["Operational"], width, bottom=df["Operational"], 
+        label='Pending Adjustment', color='#D9E1F2', alpha=0.8)
+
+ax1.set_ylabel('Available Trolleys', fontsize=11, fontweight='bold', color='#1F4E79')
+ax1.set_title(f'Trolley Availability & Capacity vs. Demand (Adjust Rate: {adjustment_rate} u/wk)', fontsize=13, fontweight='bold', pad=15, color='#1F4E79')
+ax1.set_xticks(x)
+ax1.set_xticklabels(weeks, rotation=45, ha='right', fontsize=9)
+
+ax1.spines['top'].set_visible(False)
+ax1.spines['right'].set_visible(False)
+ax1.spines['left'].set_color('#BFBFBF')
+ax1.spines['bottom'].set_color('#BFBFBF')
+ax1.grid(axis='y', linestyle='--', alpha=0.4)
+
+ax1.set_ylim(0, max(df["Physical"]) + 15)
+ax1.set_yticks(range(0, int(max(df["Physical"]) + 15), 10))
+
+# Annotate trolley numbers on top of bars
+for i, v in enumerate(df["Operational"]):
+    ax1.text(i, v + 0.8, str(v), ha='center', va='bottom', fontsize=7.5, fontweight='semibold', color='#333333')
+
+# --- TOP CHART: SECONDARY AXIS (TROLLEY CAPACITY LINE & PRODUCTION DEMAND LINE) ---
+coral_color = '#D96852'
+prod_line_color = '#27AE60'
+
+ax_uph = ax1.twinx()
+
+ax_uph.plot(x, df["UPH_Capacity"], color=coral_color, marker='o', linewidth=2.0, markersize=4.5, label='Trolley-Based Capacity (UPH)')
+
+for i, uph in enumerate(df["UPH_Capacity"]):
+    ax_uph.text(i, uph - 0.8, f"{uph}", ha='center', va='top', fontsize=6.5, fontweight='bold', color=coral_color)
+
+ax_uph.plot(x, df["Prod_UPH_Demand"], color=prod_line_color, marker='s', linewidth=2.2, markersize=5, label='Production Demand (UPH)')
+
+ax_uph.set_ylabel('Trolley Capacity & Demand (UPH)', fontsize=11, fontweight='bold', color=coral_color)
+ax_uph.tick_params(axis='y', labelcolor=coral_color)
+ax_uph.set_ylim(0, 35)
+ax_uph.spines['top'].set_visible(False)
+ax_uph.spines['left'].set_visible(False)
+ax_uph.spines['right'].set_color(coral_color)
+ax_uph.grid(False)
+
+for i, val in enumerate(df["Prod_UPH_Demand"]):
+    if val is not None and val > 0:
+        ax_uph.text(i, val + 1.2, f"{val}", ha='center', va='bottom', fontsize=6.5, fontweight='bold', color=prod_line_color)
+
+lines_1, labels_1 = ax1.get_legend_handles_labels()
+lines_2, labels_2 = ax_uph.get_legend_handles_labels()
+ax1.legend(lines_1 + lines_2, labels_1 + labels_2, frameon=False, loc='upper left', fontsize=8.5)
+
+# --- BOTTOM TRACKER: TIMELINE MILESTONES ---
+ax2.set_ylabel('Additional\nShipments', fontsize=10, fontweight='bold', color='#1F4E79', rotation=90, labelpad=25, va='center')
+
+# Row 1: Batch 1
+ax2.barh(y=1, width=4, left=1, height=0.5, color='#FFF2CC', edgecolor='#D6B656', hatch='//')
+ax2.text(3, 1, f'BATCH 1 Shipment +{batch1_qty}', ha='center', va='center', fontsize=7.5, fontweight='bold', color='#7F6000')
+
+ax2.barh(y=1, width=2, left=5, height=0.5, color='#FFE599', edgecolor='#D6B656')
+ax2.text(6, 1, 'CUSTOMS', ha='center', va='center', fontsize=7, fontweight='bold', color='#7F6000')
+
+# Row 2: Batch 2
+ax2.barh(y=0, width=4, left=8, height=0.5, color='#FFF2CC', edgecolor='#D6B656', hatch='//')
+ax2.text(10, 0, f'BATCH 2 Shipment +{batch2_qty}', ha='center', va='center', fontsize=7.5, fontweight='bold', color='#7F6000')
+
+ax2.barh(y=0, width=2, left=12, height=0.5, color='#FFE599', edgecolor='#D6B656')
+ax2.text(13, 0, 'CUSTOMS', ha='center', va='center', fontsize=7, fontweight='bold', color='#7F6000')
+
+ax2.set_yticks([])
+ax2.set_xlim(-0.5, n_weeks - 0.5)
+ax2.set_ylim(-0.5, 1.5)
+ax2.spines['top'].set_visible(False)
+ax2.spines['right'].set_visible(False)
+ax2.spines['left'].set_visible(False)
+ax2.spines['bottom'].set_color('#BFBFBF')
+ax2.grid(axis='x', linestyle=':', alpha=0.5)
+
+plt.tight_layout()
+
+st.pyplot(fig)
+plt.close(fig)
+
+# Métricas dinámicas abajo
+col1, col2, col3, col4 = st.columns(4)
+with col1:
+    st.metric(label="Base Fleet", value=f"{base_fleet} Units")
+with col2:
+    st.metric(label="Max Operational (CW13)", value=f"{op_stock[-1]} Units")
+with col3:
+    st.metric(label="Capacity at CW13", value=f"{uph_capacity[-1]} UPH")
+with col4:
+    st.metric(label="Adjustment Rate", value=f"{adjustment_rate} u/wk")
