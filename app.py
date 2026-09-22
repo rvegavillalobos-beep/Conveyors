@@ -163,21 +163,21 @@ lines_2, labels_2 = ax_uph.get_legend_handles_labels()
 ax1.legend(lines_1 + lines_2, labels_1 + labels_2, frameon=False, loc='upper left', fontsize=8.5)
 
 
-# --- BOTTOM TRACKER: DYNAMIC TRANSIT (4 wks) & CUSTOMS TIMELINE ---
+# --- BOTTOM TRACKER: TIMELINE WITH BATCH 1 & BATCH 2 LABELS ---
 ax2.set_ylabel('Additional Shipments', fontsize=10, fontweight='bold', color='#1F4E79', rotation=90, labelpad=20, va='center')
 
-# Batch 1 Tracker Rendering (4 wks Transit + Customs)
+# Batch 1 Tracker Rendering (Transit 4W + Customs)
 b1_s_idx = weeks.index(batch1_start_week)
 ax2.barh(y=1, width=transit_weeks, left=b1_s_idx, height=0.5, color='#FFF2CC', edgecolor='#D6B656', hatch='//')
-ax2.text(b1_s_idx + (transit_weeks / 2.0), 1, f'TRANSIT 4W (+{batch1_qty})', ha='center', va='center', fontsize=6.5, fontweight='bold', color='#7F6000')
+ax2.text(b1_s_idx + (transit_weeks / 2.0), 1, f'BATCH 1 (+{batch1_qty})', ha='center', va='center', fontsize=6.5, fontweight='bold', color='#7F6000')
 
 ax2.barh(y=1, width=batch1_customs, left=b1_s_idx + transit_weeks, height=0.5, color='#FFE599', edgecolor='#D6B656')
 ax2.text(b1_s_idx + transit_weeks + (batch1_customs / 2.0), 1, 'CUSTOMS', ha='center', va='center', fontsize=6.5, fontweight='bold', color='#7F6000')
 
-# Batch 2 Tracker Rendering (4 wks Transit + Customs)
+# Batch 2 Tracker Rendering (Transit 4W + Customs)
 b2_s_idx = weeks.index(batch2_start_week)
 ax2.barh(y=0, width=transit_weeks, left=b2_s_idx, height=0.5, color='#FFF2CC', edgecolor='#D6B656', hatch='//')
-ax2.text(b2_s_idx + (transit_weeks / 2.0), 0, f'TRANSIT 4W (+{batch2_qty})', ha='center', va='center', fontsize=6.5, fontweight='bold', color='#7F6000')
+ax2.text(b2_s_idx + (transit_weeks / 2.0), 0, f'BATCH 2 (+{batch2_qty})', ha='center', va='center', fontsize=6.5, fontweight='bold', color='#7F6000')
 
 ax2.barh(y=0, width=batch2_customs, left=b2_s_idx + transit_weeks, height=0.5, color='#FFE599', edgecolor='#D6B656')
 ax2.text(b2_s_idx + transit_weeks + (batch2_customs / 2.0), 0, 'CUSTOMS', ha='center', va='center', fontsize=6.5, fontweight='bold', color='#7F6000')
