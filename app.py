@@ -7,17 +7,38 @@ st.set_page_config(page_title="Trolley Availability & Trolley Capacity Ramp-Up",
 
 # --- SIDEBAR CONTROLS (Interactivity) ---
 st.sidebar.header("⚙️ Simulation Parameters")
+
+# Unit selection format
+unit_mode = st.sidebar.selectbox(
+    "Unit Display Format", 
+    ["UPH (Units / Hour)", "Units / Week", "Units / Day"]
+)
+
 adjustment_rate = st.sidebar.slider("Mechanical Adjustment Rate (units/week)", min_value=1, max_value=10, value=2, step=1)
 target_trolleys_for_30_uph = st.sidebar.slider("Trolleys required for 30 UPH", min_value=60, max_value=200, value=90, step=5)
 base_fleet = st.sidebar.number_input("Base Fleet Initial", min_value=20, max_value=60, value=35, step=5)
-batch1_qty = st.sidebar.number_input("Batch 1 Quantity (CW1)", min_value=10, max_value=50, value=24, step=2)
-batch2_qty = st.sidebar.number_input("Batch 2 Quantity (CW8)", min_value=10, max_value=60, value=30, step=2)
+
+st.sidebar.subheader("📦 Shipments & Customs Configuration")
+batch1_qty = st.sidebar.number_input("Batch 1 Quantity", min_value=10, max_value=50, value=24, step=2)
+batch1_start_week = st.sidebar.selectbox("Batch 1 Shipment Start Week", [f"CW{i}" for i in range(46, 53)] + [f"CW{i}" for i in range(1, 14)], index=0)
+batch1_customs = st.sidebar.slider("Batch 1 Customs Duration (weeks)", min_value=1, max_value=2, value=2)
+
+batch2_qty = st.sidebar.number_input("Batch 2 Quantity", min_value=10, max_value=60, value=30, step=2)
+batch2_start_week = st.sidebar.selectbox("Batch 2 Shipment Start Week", [f"CW{i}" for i in range(46, 53)] + [f"CW{i}" for i in range(1, 14)], index=7)
+batch2_customs = st.sidebar.slider("Batch 2 Customs Duration (weeks)", min_value=1, max_value=2, value=2)
 
 # 1. Timeline Setup: Extended to CW13
 weeks = [f"CW{i}" for i in range(46, 53)] + [f"CW{i}" for i in range(1, 14)]
 n_weeks = len(weeks)
 
-# 2. Simulation Logic for Trolleys & UPH Capacity
+# Determine arrival indices based on shipment start and customs duration
+b1_start_idx = weeks.index(batch1_start_week)
+b1_arrival_idx = min(b1_start_idx + batch1_customs, n_weeks - 1)
+
+b2_start_idx = weeks.index(batch2_start_week)
+b2_arrival_idx = min(b2_start_idx + batch2_customs, n_weeks - 1)
+
+# 2. Simulation Logic for Trolleys & Capacity
 current_physical = base_fleet
 current_operational = base_fleet
 
@@ -26,38 +47,56 @@ op_stock = []
 uph_capacity = []
 
 for idx, w in enumerate(weeks):
-    if idx == 7:  # Starting CW1
+    if idx == b1_arrival_idx:
         current_physical += batch1_qty
-    if idx == 14: # Starting CW8
+    if idx == b2_arrival_idx:
         current_physical += batch2_qty
         
     phys_stock.append(current_physical)
     
     # Mechanical adjustment logic: paused during Shutdown (CW52 and CW1)
-    is_shutdown = (weeks[idx] in ["CW52", "CW1"])
+    is_shutdown = (w in ["CW52", "CW1"])
     
     if not is_shutdown and current_operational < current_physical:
         current_operational = min(current_physical, current_operational + adjustment_rate)
         
     op_stock.append(current_operational)
     
-    # Calculate available trolley-based capacity based on dynamic ratio
+    # Base calculation in UPH (30 UPH per target trolleys)
     calculated_uph = round((current_operational / float(target_trolleys_for_30_uph)) * 30, 1)
     uph_capacity.append(calculated_uph)
 
-# 3. Weekly Production Data Converted to UPH (45 hrs/week: 5 days * 9 hours)
+# 3. Weekly Production Raw Data (Units / Week) & Unit Conversion Scaling Factor
 raw_production_up_to_cw8 = [49, 69, 123, 147, 184, 196, 0, 0, 176, 199, 223, 246, 206, 270, 281]
-production_uph_demand = [round(p / 45.0, 1) if p > 0 else 0.0 for p in raw_production_up_to_cw8]
 
-while len(production_uph_demand) < n_weeks:
-    production_uph_demand.append(None)
+if unit_mode == "UPH (Units / Hour)":
+    scale_factor = 1.0  # UPH = Units / 45 hrs
+    demand_divisor = 45.0
+    y_label_secondary = "Trolley Capacity & Demand (UPH)"
+    max_y_secondary = 35
+elif unit_mode == "Units / Week":
+    scale_factor = 45.0  # UPH * 45 hrs/week = Units/week
+    demand_divisor = 1.0
+    y_label_secondary = "Trolley Capacity & Demand (Units / Week)"
+    max_y_secondary = 1500
+else:  # Units / Day (Assuming 5 working days per week)
+    scale_factor = 45.0 / 5.0  # 9.0
+    demand_divisor = 5.0
+    y_label_secondary = "Trolley Capacity & Demand (Units / Day)"
+    max_y_secondary = 300
+
+scaled_uph_capacity = [round(val * scale_factor, 1) for val in uph_capacity]
+production_demand_converted = [round(p / demand_divisor, 1) if p > 0 else 0.0 for p in raw_production_up_to_cw8]
+
+while len(production_demand_converted) < n_weeks:
+    production_demand_converted.append(None)
 
 df = pd.DataFrame({
     "Week": weeks,
     "Physical": phys_stock,
     "Operational": op_stock,
-    "UPH_Capacity": uph_capacity,
-    "Prod_UPH_Demand": production_uph_demand
+    "Capacity_Converted": scaled_uph_capacity,
+    "Demand_Converted": production_demand_converted
 })
 
 cw8_index = weeks.index("CW8")
@@ -92,50 +131,54 @@ for i, v in enumerate(df["Operational"]):
     ax1.text(i, v + 0.8, str(v), ha='center', va='bottom', fontsize=7.5, fontweight='semibold', color='#333333')
 
 
-# --- TOP CHART: SECONDARY AXIS (TROLLEY CAPACITY LINE & PRODUCTION DEMAND LINE) ---
+# --- TOP CHART: SECONDARY AXIS (CAPACITY & DEMAND) ---
 coral_color = '#D96852'
 prod_line_color = '#27AE60'
 
 ax_uph = ax1.twinx()
 
-ax_uph.plot(x, df["UPH_Capacity"], color=coral_color, marker='o', linewidth=2.0, markersize=4.5, label='Trolley-Based Capacity (UPH)')
+ax_uph.plot(x, df["Capacity_Converted"], color=coral_color, marker='o', linewidth=2.0, markersize=4.5, label=f'Capacity ({unit_mode})')
 
-for i, uph in enumerate(df["UPH_Capacity"]):
-    ax_uph.text(i, uph - 0.8, f"{uph}", ha='center', va='top', fontsize=6.5, fontweight='bold', color=coral_color)
+for i, val in enumerate(df["Capacity_Converted"]):
+    ax_uph.text(i, val - (max_y_secondary * 0.03), f"{val}", ha='center', va='top', fontsize=6.5, fontweight='bold', color=coral_color)
 
-ax_uph.plot(x, df["Prod_UPH_Demand"], color=prod_line_color, marker='s', linewidth=2.2, markersize=5, label='Production Demand (UPH)')
+ax_uph.plot(x, df["Demand_Converted"], color=prod_line_color, marker='s', linewidth=2.2, markersize=5, label=f'Production Demand ({unit_mode})')
 
-ax_uph.set_ylabel('Trolley Capacity & Demand (UPH)', fontsize=11, fontweight='bold', color=coral_color)
+ax_uph.set_ylabel(y_label_secondary, fontsize=11, fontweight='bold', color=coral_color)
 ax_uph.tick_params(axis='y', labelcolor=coral_color)
-ax_uph.set_ylim(0, 35)
+ax_uph.set_ylim(0, max_y_secondary)
 ax_uph.spines['top'].set_visible(False)
 ax_uph.spines['left'].set_visible(False)
 ax_uph.spines['right'].set_color(coral_color)
 ax_uph.grid(False)
 
-for i, val in enumerate(df["Prod_UPH_Demand"]):
+for i, val in enumerate(df["Demand_Converted"]):
     if val is not None and val > 0:
-        ax_uph.text(i, val + 1.2, f"{val}", ha='center', va='bottom', fontsize=6.5, fontweight='bold', color=prod_line_color)
+        ax_uph.text(i, val + (max_y_secondary * 0.03), f"{val}", ha='center', va='bottom', fontsize=6.5, fontweight='bold', color=prod_line_color)
 
 lines_1, labels_1 = ax1.get_legend_handles_labels()
 lines_2, labels_2 = ax_uph.get_legend_handles_labels()
 ax1.legend(lines_1 + lines_2, labels_1 + labels_2, frameon=False, loc='upper left', fontsize=8.5)
 
 
-# --- BOTTOM TRACKER: TIMELINE MILESTONES ---
+# --- BOTTOM TRACKER: DYNAMIC SHIPMENT & CUSTOMS TIMELINE ---
 ax2.set_ylabel('Additional Shipments', fontsize=10, fontweight='bold', color='#1F4E79', rotation=90, labelpad=20, va='center')
 
-ax2.barh(y=1, width=4, left=1, height=0.5, color='#FFF2CC', edgecolor='#D6B656', hatch='//')
-ax2.text(3, 1, f'BATCH 1 Shipment +{batch1_qty}', ha='center', va='center', fontsize=7.5, fontweight='bold', color='#7F6000')
+# Batch 1 Tracker Rendering
+b1_s_idx = weeks.index(batch1_start_week)
+ax2.barh(y=1, width=batch1_customs, left=b1_s_idx, height=0.5, color='#FFF2CC', edgecolor='#D6B656', hatch='//')
+ax2.text(b1_s_idx + (batch1_customs / 2.0), 1, f'BATCH 1 (+{batch1_qty})', ha='center', va='center', fontsize=7, fontweight='bold', color='#7F6000')
 
-ax2.barh(y=1, width=2, left=5, height=0.5, color='#FFE599', edgecolor='#D6B656')
-ax2.text(6, 1, 'CUSTOMS', ha='center', va='center', fontsize=7, fontweight='bold', color='#7F6000')
+ax2.barh(y=1, width=batch1_customs, left=b1_s_idx + batch1_customs, height=0.5, color='#FFE599', edgecolor='#D6B656')
+ax2.text(b1_s_idx + batch1_customs + (batch1_customs / 2.0), 1, 'CUSTOMS', ha='center', va='center', fontsize=6.5, fontweight='bold', color='#7F6000')
 
-ax2.barh(y=0, width=4, left=8, height=0.5, color='#FFF2CC', edgecolor='#D6B656', hatch='//')
-ax2.text(10, 0, f'BATCH 2 Shipment +{batch2_qty}', ha='center', va='center', fontsize=7.5, fontweight='bold', color='#7F6000')
+# Batch 2 Tracker Rendering
+b2_s_idx = weeks.index(batch2_start_week)
+ax2.barh(y=0, width=batch2_customs, left=b2_s_idx, height=0.5, color='#FFF2CC', edgecolor='#D6B656', hatch='//')
+ax2.text(b2_s_idx + (batch2_customs / 2.0), 0, f'BATCH 2 (+{batch2_qty})', ha='center', va='center', fontsize=7, fontweight='bold', color='#7F6000')
 
-ax2.barh(y=0, width=2, left=12, height=0.5, color='#FFE599', edgecolor='#D6B656')
-ax2.text(13, 0, 'CUSTOMS', ha='center', va='center', fontsize=7, fontweight='bold', color='#7F6000')
+ax2.barh(y=0, width=batch2_customs, left=b2_s_idx + batch2_customs, height=0.5, color='#FFE599', edgecolor='#D6B656')
+ax2.text(b2_s_idx + batch2_customs + (batch2_customs / 2.0), 0, 'CUSTOMS', ha='center', va='center', fontsize=6.5, fontweight='bold', color='#7F6000')
 
 ax2.set_yticks([])
 ax2.set_xlim(-0.5, n_weeks - 0.5)
@@ -148,17 +191,18 @@ ax2.grid(axis='x', linestyle=':', alpha=0.5)
 
 plt.tight_layout()
 
-# 4. Render in Streamlit
+# Render Matplotlib Figure in Streamlit
 st.pyplot(fig)
 plt.close(fig)
 
+# --- METRICS ROW (CW8) ---
 col1, col2, col3, col4 = st.columns(4)
 with col1:
     st.metric(label="Base Fleet", value=f"{base_fleet} Units")
 with col2:
     st.metric(label="Max Operational (CW8)", value=f"{op_stock[cw8_index]} Units")
 with col3:
-    st.metric(label="Trolley Capacity at CW8", value=f"{uph_capacity[cw8_index]} UPH")
+    st.metric(label=f"Capacity at CW8 ({unit_mode.split()[0]})", value=f"{scaled_uph_capacity[cw8_index]}")
 with col4:
     st.metric(label="Adjustment Rate", value=f"{adjustment_rate} u/wk")
 
