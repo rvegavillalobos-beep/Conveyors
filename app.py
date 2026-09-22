@@ -19,24 +19,26 @@ target_trolleys_for_30_uph = st.sidebar.slider("Trolleys required for 30 UPH", m
 base_fleet = st.sidebar.number_input("Base Fleet Initial", min_value=20, max_value=60, value=35, step=5)
 
 st.sidebar.subheader("📦 Shipments & Customs Configuration")
+transit_weeks = 4  # 4 semanas estándar de tránsito fijo
+
 batch1_qty = st.sidebar.number_input("Batch 1 Quantity", min_value=10, max_value=50, value=24, step=2)
 batch1_start_week = st.sidebar.selectbox("Batch 1 Shipment Start Week", [f"CW{i}" for i in range(46, 53)] + [f"CW{i}" for i in range(1, 14)], index=0)
-batch1_customs = st.sidebar.slider("Batch 1 Customs Duration (weeks)", min_value=1, max_value=2, value=2)
+batch1_customs = st.sidebar.slider("Batch 1 Customs Duration (weeks)", min_value=1, max_value=2, value=2, key="b1_customs")
 
 batch2_qty = st.sidebar.number_input("Batch 2 Quantity", min_value=10, max_value=60, value=30, step=2)
-batch2_start_week = st.sidebar.selectbox("Batch 2 Shipment Start Week", [f"CW{i}" for i in range(46, 53)] + [f"CW{i}" for i in range(1, 14)], index=7)
-batch2_customs = st.sidebar.slider("Batch 2 Customs Duration (weeks)", min_value=1, max_value=2, value=2)
+batch2_start_week = st.sidebar.selectbox("Batch 2 Shipment Start Week", [f"CW{i}" for i in range(46, 53)] + [f"CW{i}" for i in range(1, 14)], index=7, key="b2_start")
+batch2_customs = st.sidebar.slider("Batch 2 Customs Duration (weeks)", min_value=1, max_value=2, value=2, key="b2_customs")
 
 # 1. Timeline Setup: Extended to CW13
 weeks = [f"CW{i}" for i in range(46, 53)] + [f"CW{i}" for i in range(1, 14)]
 n_weeks = len(weeks)
 
-# Determine arrival indices based on shipment start and customs duration
+# Determine arrival indices: 4 weeks of transit + customs duration
 b1_start_idx = weeks.index(batch1_start_week)
-b1_arrival_idx = min(b1_start_idx + batch1_customs, n_weeks - 1)
+b1_arrival_idx = min(b1_start_idx + transit_weeks + batch1_customs, n_weeks - 1)
 
 b2_start_idx = weeks.index(batch2_start_week)
-b2_arrival_idx = min(b2_start_idx + batch2_customs, n_weeks - 1)
+b2_arrival_idx = min(b2_start_idx + transit_weeks + batch2_customs, n_weeks - 1)
 
 # 2. Simulation Logic for Trolleys & Capacity
 current_physical = base_fleet
@@ -70,17 +72,17 @@ for idx, w in enumerate(weeks):
 raw_production_up_to_cw8 = [49, 69, 123, 147, 184, 196, 0, 0, 176, 199, 223, 246, 206, 270, 281]
 
 if unit_mode == "UPH (Units / Hour)":
-    scale_factor = 1.0  # UPH = Units / 45 hrs
+    scale_factor = 1.0  
     demand_divisor = 45.0
     y_label_secondary = "Trolley Capacity & Demand (UPH)"
     max_y_secondary = 35
 elif unit_mode == "Units / Week":
-    scale_factor = 45.0  # UPH * 45 hrs/week = Units/week
+    scale_factor = 45.0  
     demand_divisor = 1.0
     y_label_secondary = "Trolley Capacity & Demand (Units / Week)"
     max_y_secondary = 1500
-else:  # Units / Day (Assuming 5 working days per week)
-    scale_factor = 45.0 / 5.0  # 9.0
+else:  
+    scale_factor = 45.0 / 5.0  
     demand_divisor = 5.0
     y_label_secondary = "Trolley Capacity & Demand (Units / Day)"
     max_y_secondary = 300
@@ -161,24 +163,24 @@ lines_2, labels_2 = ax_uph.get_legend_handles_labels()
 ax1.legend(lines_1 + lines_2, labels_1 + labels_2, frameon=False, loc='upper left', fontsize=8.5)
 
 
-# --- BOTTOM TRACKER: DYNAMIC SHIPMENT & CUSTOMS TIMELINE ---
+# --- BOTTOM TRACKER: DYNAMIC TRANSIT (4 wks) & CUSTOMS TIMELINE ---
 ax2.set_ylabel('Additional Shipments', fontsize=10, fontweight='bold', color='#1F4E79', rotation=90, labelpad=20, va='center')
 
-# Batch 1 Tracker Rendering
+# Batch 1 Tracker Rendering (4 wks Transit + Customs)
 b1_s_idx = weeks.index(batch1_start_week)
-ax2.barh(y=1, width=batch1_customs, left=b1_s_idx, height=0.5, color='#FFF2CC', edgecolor='#D6B656', hatch='//')
-ax2.text(b1_s_idx + (batch1_customs / 2.0), 1, f'BATCH 1 (+{batch1_qty})', ha='center', va='center', fontsize=7, fontweight='bold', color='#7F6000')
+ax2.barh(y=1, width=transit_weeks, left=b1_s_idx, height=0.5, color='#FFF2CC', edgecolor='#D6B656', hatch='//')
+ax2.text(b1_s_idx + (transit_weeks / 2.0), 1, f'TRANSIT 4W (+{batch1_qty})', ha='center', va='center', fontsize=6.5, fontweight='bold', color='#7F6000')
 
-ax2.barh(y=1, width=batch1_customs, left=b1_s_idx + batch1_customs, height=0.5, color='#FFE599', edgecolor='#D6B656')
-ax2.text(b1_s_idx + batch1_customs + (batch1_customs / 2.0), 1, 'CUSTOMS', ha='center', va='center', fontsize=6.5, fontweight='bold', color='#7F6000')
+ax2.barh(y=1, width=batch1_customs, left=b1_s_idx + transit_weeks, height=0.5, color='#FFE599', edgecolor='#D6B656')
+ax2.text(b1_s_idx + transit_weeks + (batch1_customs / 2.0), 1, 'CUSTOMS', ha='center', va='center', fontsize=6.5, fontweight='bold', color='#7F6000')
 
-# Batch 2 Tracker Rendering
+# Batch 2 Tracker Rendering (4 wks Transit + Customs)
 b2_s_idx = weeks.index(batch2_start_week)
-ax2.barh(y=0, width=batch2_customs, left=b2_s_idx, height=0.5, color='#FFF2CC', edgecolor='#D6B656', hatch='//')
-ax2.text(b2_s_idx + (batch2_customs / 2.0), 0, f'BATCH 2 (+{batch2_qty})', ha='center', va='center', fontsize=7, fontweight='bold', color='#7F6000')
+ax2.barh(y=0, width=transit_weeks, left=b2_s_idx, height=0.5, color='#FFF2CC', edgecolor='#D6B656', hatch='//')
+ax2.text(b2_s_idx + (transit_weeks / 2.0), 0, f'TRANSIT 4W (+{batch2_qty})', ha='center', va='center', fontsize=6.5, fontweight='bold', color='#7F6000')
 
-ax2.barh(y=0, width=batch2_customs, left=b2_s_idx + batch2_customs, height=0.5, color='#FFE599', edgecolor='#D6B656')
-ax2.text(b2_s_idx + batch2_customs + (batch2_customs / 2.0), 0, 'CUSTOMS', ha='center', va='center', fontsize=6.5, fontweight='bold', color='#7F6000')
+ax2.barh(y=0, width=batch2_customs, left=b2_s_idx + transit_weeks, height=0.5, color='#FFE599', edgecolor='#D6B656')
+ax2.text(b2_s_idx + transit_weeks + (batch2_customs / 2.0), 0, 'CUSTOMS', ha='center', va='center', fontsize=6.5, fontweight='bold', color='#7F6000')
 
 ax2.set_yticks([])
 ax2.set_xlim(-0.5, n_weeks - 0.5)
