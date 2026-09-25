@@ -29,6 +29,11 @@ batch2_qty = st.sidebar.number_input("Batch 2 Quantity", min_value=10, max_value
 batch2_start_week = st.sidebar.selectbox("Batch 2 Shipment Start Week", [f"CW{i}" for i in range(46, 53)] + [f"CW{i}" for i in range(1, 14)], index=7, key="b2_start")
 batch2_customs = st.sidebar.slider("Batch 2 Customs Duration (weeks)", min_value=1, max_value=2, value=2, key="b2_customs")
 
+# --- SCRAP CONFIGURATION ---
+st.sidebar.subheader("🗑️ Scrap Line Configuration")
+enable_scrap = st.sidebar.checkbox("Activate Scrap Line", value=False)
+scrap_pct = st.sidebar.slider("Scrap Percentage (%)", min_value=0.0, max_value=20.0, value=3.0, step=0.5)
+
 # 1. Timeline Setup: Extended to CW13
 weeks = [f"CW{i}" for i in range(46, 53)] + [f"CW{i}" for i in range(1, 14)]
 n_weeks = len(weeks)
@@ -74,17 +79,17 @@ raw_production_up_to_cw8 = [49, 69, 123, 147, 184, 196, 0, 0, 176, 199, 223, 246
 if unit_mode == "UPH (Units / Hour)":
     scale_factor = 1.0  
     demand_divisor = 45.0
-    y_label_secondary = "Trolley Capacity & Demand (UPH)"
+    y_label_secondary = "Trolley Capacity, Demand & Scrap (UPH)"
     max_y_secondary = 35
 elif unit_mode == "Units / Week":
     scale_factor = 45.0  
     demand_divisor = 1.0
-    y_label_secondary = "Trolley Capacity & Demand (Units / Week)"
+    y_label_secondary = "Trolley Capacity, Demand & Scrap (Units / Week)"
     max_y_secondary = 1500
 else:  
     scale_factor = 45.0 / 5.0  
     demand_divisor = 5.0
-    y_label_secondary = "Trolley Capacity & Demand (Units / Day)"
+    y_label_secondary = "Trolley Capacity, Demand & Scrap (Units / Day)"
     max_y_secondary = 300
 
 scaled_uph_capacity = [round(val * scale_factor, 1) for val in uph_capacity]
@@ -93,12 +98,19 @@ production_demand_converted = [round(p / demand_divisor, 1) if p > 0 else 0.0 fo
 while len(production_demand_converted) < n_weeks:
     production_demand_converted.append(None)
 
+# Calculate Scrap Series based on Converted Demand and Selected Percentage
+scrap_converted = [
+    round(val * (scrap_pct / 100.0), 1) if val is not None and val > 0 else 0.0 
+    for val in production_demand_converted
+]
+
 df = pd.DataFrame({
     "Week": weeks,
     "Physical": phys_stock,
     "Operational": op_stock,
     "Capacity_Converted": scaled_uph_capacity,
-    "Demand_Converted": production_demand_converted
+    "Demand_Converted": production_demand_converted,
+    "Scrap_Converted": scrap_converted
 })
 
 cw8_index = weeks.index("CW8")
@@ -133,18 +145,30 @@ for i, v in enumerate(df["Operational"]):
     ax1.text(i, v + 0.8, str(v), ha='center', va='bottom', fontsize=7.5, fontweight='semibold', color='#333333')
 
 
-# --- TOP CHART: SECONDARY AXIS (CAPACITY & DEMAND) ---
+# --- TOP CHART: SECONDARY AXIS (CAPACITY, DEMAND & SCRAP) ---
 coral_color = '#D96852'
 prod_line_color = '#27AE60'
+scrap_line_color = '#E67E22'
 
 ax_uph = ax1.twinx()
 
-ax_uph.plot(x, df["Capacity_Converted"], color=coral_color, marker='o', linewidth=2.0, markersize=4.5, label=f'Capacity ({unit_mode})')
-
+# Capacity Line
+ax_uph.plot(x, df["Capacity_Converted"], color=coral_color, marker='o', linewidth=2.0, markersize=4.5, label=f'Capacity ({unit_mode.split()[0]})')
 for i, val in enumerate(df["Capacity_Converted"]):
     ax_uph.text(i, val - (max_y_secondary * 0.03), f"{val}", ha='center', va='top', fontsize=6.5, fontweight='bold', color=coral_color)
 
-ax_uph.plot(x, df["Demand_Converted"], color=prod_line_color, marker='s', linewidth=2.2, markersize=5, label=f'Production Demand ({unit_mode})')
+# Production Demand Line
+ax_uph.plot(x, df["Demand_Converted"], color=prod_line_color, marker='s', linewidth=2.2, markersize=5, label=f'Production Demand ({unit_mode.split()[0]})')
+for i, val in enumerate(df["Demand_Converted"]):
+    if val is not None and val > 0:
+        ax_uph.text(i, val + (max_y_secondary * 0.03), f"{val}", ha='center', va='bottom', fontsize=6.5, fontweight='bold', color=prod_line_color)
+
+# Optional Scrap Line
+if enable_scrap:
+    ax_uph.plot(x, df["Scrap_Converted"], color=scrap_line_color, marker='^', linestyle='--', linewidth=1.8, markersize=4.5, label=f'Scrap ({scrap_pct}%)')
+    for i, val in enumerate(df["Scrap_Converted"]):
+        if val is not None and val > 0:
+            ax_uph.text(i, val + (max_y_secondary * 0.07), f"{val}", ha='center', va='bottom', fontsize=6, fontweight='bold', color=scrap_line_color)
 
 ax_uph.set_ylabel(y_label_secondary, fontsize=11, fontweight='bold', color=coral_color)
 ax_uph.tick_params(axis='y', labelcolor=coral_color)
@@ -154,13 +178,9 @@ ax_uph.spines['left'].set_visible(False)
 ax_uph.spines['right'].set_color(coral_color)
 ax_uph.grid(False)
 
-for i, val in enumerate(df["Demand_Converted"]):
-    if val is not None and val > 0:
-        ax_uph.text(i, val + (max_y_secondary * 0.03), f"{val}", ha='center', va='bottom', fontsize=6.5, fontweight='bold', color=prod_line_color)
-
 lines_1, labels_1 = ax1.get_legend_handles_labels()
 lines_2, labels_2 = ax_uph.get_legend_handles_labels()
-ax1.legend(lines_1 + lines_2, labels_1 + labels_2, frameon=False, loc='upper left', fontsize=8.5)
+ax1.legend(lines_1 + lines_2, labels_1 + labels_2, frameon=False, loc='upper left', fontsize=8)
 
 
 # --- BOTTOM TRACKER: TIMELINE WITH BATCH 1 & BATCH 2 LABELS ---
