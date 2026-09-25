@@ -32,7 +32,7 @@ batch2_customs = st.sidebar.slider("Batch 2 Customs Duration (weeks)", min_value
 # --- SCRAP CONFIGURATION ---
 st.sidebar.subheader("🗑️ Scrap Line Configuration")
 enable_scrap = st.sidebar.checkbox("Activate Scrap Line", value=False)
-scrap_pct = st.sidebar.slider("Scrap Percentage (%)", min_value=0.0, max_value=20.0, value=3.0, step=0.5)
+scrap_pct = st.sidebar.slider("Scrap Percentage (%)", min_value=0.0, max_value=30.0, value=3.0, step=0.5)
 
 # 1. Timeline Setup: Extended to CW13
 weeks = [f"CW{i}" for i in range(46, 53)] + [f"CW{i}" for i in range(1, 14)]
@@ -148,7 +148,7 @@ for i, v in enumerate(df["Operational"]):
 # --- TOP CHART: SECONDARY AXIS (CAPACITY, DEMAND & SCRAP) ---
 coral_color = '#D96852'
 prod_line_color = '#27AE60'
-scrap_line_color = '#E67E22'
+scrap_line_color = '#E74C3C'  # Línea roja para el scrap
 
 ax_uph = ax1.twinx()
 
@@ -163,12 +163,12 @@ for i, val in enumerate(df["Demand_Converted"]):
     if val is not None and val > 0:
         ax_uph.text(i, val + (max_y_secondary * 0.03), f"{val}", ha='center', va='bottom', fontsize=6.5, fontweight='bold', color=prod_line_color)
 
-# Optional Scrap Line
+# Optional Scrap Line (Rojo y texto DEBAJO de la línea)
 if enable_scrap:
     ax_uph.plot(x, df["Scrap_Converted"], color=scrap_line_color, marker='^', linestyle='--', linewidth=1.8, markersize=4.5, label=f'Scrap ({scrap_pct}%)')
     for i, val in enumerate(df["Scrap_Converted"]):
         if val is not None and val > 0:
-            ax_uph.text(i, val + (max_y_secondary * 0.07), f"{val}", ha='center', va='bottom', fontsize=6, fontweight='bold', color=scrap_line_color)
+            ax_uph.text(i, val - (max_y_secondary * 0.05), f"{val}", ha='center', va='top', fontsize=6, fontweight='bold', color=scrap_line_color)
 
 ax_uph.set_ylabel(y_label_secondary, fontsize=11, fontweight='bold', color=coral_color)
 ax_uph.tick_params(axis='y', labelcolor=coral_color)
