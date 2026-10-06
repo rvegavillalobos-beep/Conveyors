@@ -23,6 +23,8 @@ from matplotlib.patches import Patch  # noqa: E402
 from matplotlib.ticker import MaxNLocator  # noqa: E402
 from matplotlib.transforms import blended_transform_factory  # noqa: E402
 
+import requirements_map  # noqa: E402
+
 APP_DIR = Path(__file__).parent
 
 # =============================================================================
@@ -327,9 +329,9 @@ def draw_main_chart(s: dict) -> bytes:
     x = np.arange(n)
     cap, op, phys = s["cap"], s["op"], s["phys"]
 
-    fig = plt.figure(figsize=(FIG_W, 10.0), facecolor=SURFACE)
+    fig = plt.figure(figsize=(FIG_W, 9.2), facecolor=SURFACE)
     gs = fig.add_gridspec(3, 1, height_ratios=[3.1, 1.6, 0.95], hspace=0.5,
-                          left=LEFT, right=RIGHT, top=0.862, bottom=0.075)
+                          left=LEFT, right=RIGHT, top=0.95, bottom=0.08)
     ax_a = fig.add_subplot(gs[0])
     ax_b = fig.add_subplot(gs[1], sharex=ax_a)
     ax_c = fig.add_subplot(gs[2], sharex=ax_a)
@@ -340,15 +342,6 @@ def draw_main_chart(s: dict) -> bytes:
     ax_a.tick_params(labelbottom=True)
     ax_b.tick_params(labelbottom=False)
     ax_a.grid(axis="x", color=GRID, linewidth=0.7)
-
-    # ---- Figure title (keeps the PNG self-explanatory when pasted into slides) ----
-    b1, b2 = s["batches"]
-    fig.text(LEFT, 0.968, "Trolley capacity vs. production demand", fontsize=18, fontweight=700,
-             color=INK, ha="left", va="top")
-    subtitle = (f"{b1.name} +{b1.qty}: ships {b1.ship_label}, on site {b1.arrival_label}, ready {b1.ready_label}"
-                f"   ·   {b2.name} +{b2.qty}: ships {b2.ship_label}, on site {b2.arrival_label}, "
-                f"ready {b2.ready_label}   ·   Adjustment {p.rate}/wk, {s['sd_text']}")
-    fig.text(LEFT, 0.933, subtitle, fontsize=10, color=INK2, ha="left", va="top")
 
     sd_note = f"adjusting {p.shutdown_rate}/wk" if p.adjust_in_shutdown else "adjustment paused"
     _shade_shutdown((ax_a, ax_b, ax_c), weeks, label_ax=ax_a, note=sd_note)
@@ -640,22 +633,14 @@ CSS = """
 .block-container{padding-top:2.4rem;padding-bottom:3rem;max-width:1480px}
 [data-testid="stImage"] img{border-radius:14px;border:1px solid rgba(11,11,11,.08)}
 .tcr{font-family:'Inter',system-ui,-apple-system,'Segoe UI',sans-serif;color:#0b0b0b}
-.tcr-eyebrow{font-size:12px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:#2a78d6}
-.tcr-title{font-size:34px;font-weight:700;letter-spacing:-.025em;line-height:1.12;margin:6px 0 8px}
-.tcr-sub{font-size:15px;line-height:1.5;color:#52514e;max-width:900px}
-.tcr-chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:16px}
-.tcr-chip{display:inline-flex;align-items:center;gap:8px;padding:6px 12px;border-radius:999px;background:#fff;border:1px solid rgba(11,11,11,.09);font-size:13px;color:#52514e;line-height:1.3}
-.tcr-chip b{color:#0b0b0b;font-weight:600}
-.tcr-dot{width:9px;height:9px;border-radius:3px;display:inline-block;flex:none}
+.tcr-req{background:#fff;border:1px solid rgba(11,11,11,.08);border-radius:16px;overflow:hidden;margin-bottom:6px}
+.tcr-req svg{display:block;width:100%;height:auto}
 .tcr-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px;margin:24px 0 20px}
 .tcr-kpi{background:#fff;border:1px solid rgba(11,11,11,.08);border-radius:14px;padding:16px 18px 15px;box-shadow:0 1px 2px rgba(11,11,11,.04)}
 .tcr-kpi-label{font-size:12.5px;font-weight:500;color:#52514e}
 .tcr-kpi-value{font-size:30px;font-weight:650;letter-spacing:-.02em;line-height:1.1;margin-top:8px;color:#0b0b0b}
 .tcr-kpi-unit{font-size:14px;font-weight:500;color:#52514e;letter-spacing:0;margin-left:5px}
 .tcr-kpi-sub{font-size:12.5px;color:#898781;margin-top:7px;line-height:1.45}
-.tcr-pill{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;padding:3px 9px;border-radius:999px;margin-top:9px}
-.tcr-pill.good{color:#006300;background:#e8f4e8}
-.tcr-pill.bad{color:#a12a2a;background:#fbeaea}
 .tcr-hero{font-size:52px;font-weight:700;letter-spacing:-.03em;line-height:1}
 .tcr-section{font-size:21px;font-weight:650;letter-spacing:-.015em;margin:34px 0 4px}
 .tcr-section-sub{font-size:14px;color:#52514e;margin-bottom:14px;line-height:1.5}
@@ -735,68 +720,21 @@ main_png, scrap_png = render_charts(astuple(params))
 unit = s["unit"]
 dec, u = unit["decimals"], unit["short"]
 weeks, years = s["weeks"], s["years"]
-ref_k = s["ref_k"]
-ref_week = weeks[ref_k]
-b1, b2 = s["batches"]
-
-# ---------------------------------------------------------------- Header
-def chip(color: str, html: str) -> str:
-    return f'<span class="tcr-chip"><span class="tcr-dot" style="background:{color}"></span>{html}</span>'
 
 
-chips = "".join([
-    chip(NAVY, f"<b>{b.name} +{b.qty}</b> ships {b.ship_label} · on site {b.arrival_label} "
-               f"· ready {b.ready_label}") for b in (b1, b2)
-] + [chip(PENDING, f"<b>Adjustment {params.rate}/wk</b> · {s['sd_text']}"),
-     chip(BLUE, f"<b>{params.trolleys_for_30} trolleys</b> = {UPH_AT_TARGET} UPH")])
-
-st.markdown(
-    '<div class="tcr">'
-    '<div class="tcr-eyebrow">Logistics · Outfeed & infeed trolleys</div>'
-    '<div class="tcr-title">Trolley capacity ramp-up</div>'
-    f'<div class="tcr-sub">Does the trolley fleet keep pace with production demand? Week-by-week view from '
-    f'{weeks[0]} {years[0]} to {weeks[-1]} {years[-1]}, including incoming shipments, mechanical adjustment '
-    f'and the year-end shutdown. Demand data available through {ref_week}.</div>'
-    f'<div class="tcr-chips">{chips}</div>'
-    '</div>',
-    unsafe_allow_html=True,
-)
-
-# ---------------------------------------------------------------- KPI cards
-def kpi(label: str, value: str, unit_txt: str = "", sub: str = "", pill: str = "") -> str:
+def kpi(label: str, value: str, unit_txt: str = "", sub: str = "") -> str:
     unit_html = f'<span class="tcr-kpi-unit">{unit_txt}</span>' if unit_txt else ""
     return (f'<div class="tcr-kpi"><div class="tcr-kpi-label">{label}</div>'
-            f'<div class="tcr-kpi-value">{value}{unit_html}</div>{pill}'
+            f'<div class="tcr-kpi-value">{value}{unit_html}</div>'
             f'<div class="tcr-kpi-sub">{sub}</div></div>')
 
 
-phys_end, op_ref, phys_ref = int(s["phys"][-1]), int(s["op"][ref_k]), int(s["phys"][ref_k])
-cap_ref, dem_ref = s["cap"][ref_k], s["demand"][ref_k] or 0.0
-cards = [
-    kpi(f"Trolleys on site by {weeks[-1]}", f"{phys_end}", "trolleys",
-        f"{params.base_fleet} today + {b1.qty + b2.qty} incoming"),
-    kpi(f"Operational at {ref_week}", f"{op_ref}", f"of {phys_ref}",
-        f"{phys_ref - op_ref} still pending adjustment" if phys_ref > op_ref else "Every trolley on site is adjusted"),
-    kpi(f"Capacity at {ref_week}", fmt(cap_ref, dec), u,
-        f"Demand {fmt(dem_ref, dec)} {u} · {dem_ref / cap_ref:.0%} of capacity used" if cap_ref else ""),
-]
-if s["tight_k"] is not None:
-    tk = s["tight_k"]
-    hr = s["headroom"][tk]
-    n_prod, n_short = len(s["prod_weeks"]), len(s["short_weeks"])
-    if n_short:
-        cards.append(kpi("Largest capacity shortfall", fmt_signed(hr, dec), u,
-                         f"Worst in {weeks[tk]}: capacity {fmt(s['cap'][tk], dec)} vs demand "
-                         f"{fmt(s['demand'][tk], dec)}",
-                         f'<span class="tcr-pill bad">▲ Short in {n_short} of {n_prod} production weeks</span>'))
-    else:
-        cards.append(kpi("Tightest headroom", fmt_signed(hr, dec), u,
-                         f"{weeks[tk]}: capacity {fmt(s['cap'][tk], dec)} vs demand {fmt(s['demand'][tk], dec)}",
-                         '<span class="tcr-pill good">✓ Demand covered every week</span>'))
-if params.scrap_on:
-    cards.append(kpi("Scrap accumulated", f"≈ {round(s['window_total']):,}", "modules",
-                     f"{week_range(s['window'])} · {s['window_why']}"))
-st.markdown(f'<div class="tcr tcr-kpis">{"".join(cards)}</div>', unsafe_allow_html=True)
+# ---------------------------------------------------------------- Trolley requirements (top)
+req_svg = requirements_map.build_svg()
+st.markdown(f'<div class="tcr-req">{req_svg}</div>', unsafe_allow_html=True)
+st.download_button("Download requirements map (SVG)", data=req_svg.encode("utf-8"),
+                   file_name="trolley_requirements_by_station.svg", mime="image/svg+xml")
+st.markdown('<div style="height:14px"></div>', unsafe_allow_html=True)
 
 # ---------------------------------------------------------------- Main chart
 st.image(main_png)
