@@ -79,6 +79,7 @@ CRITICAL = "#d03b3b"                                        # shortfall (status)
 SHUTDOWN_FILL, NODATA_FILL = "#f0efea", "#f8f7f4"
 TRANSIT_FILL, CUSTOMS_FILL = "#f6e2ae", "#eda100"
 OUT_OF_WINDOW = "#dad8d1"
+CAP_TEXT, DEM_TEXT = "#1c5cab", "#a8461d"                   # darker steps for value labels
 
 FIG_W = 14.0
 LEFT, RIGHT = 0.078, 0.905
@@ -300,7 +301,8 @@ def _shade_shutdown(axes, weeks, label_ax=None, note=None) -> None:
 
 def _week_axis(ax, weeks, years) -> None:
     ax.set_xticks(np.arange(len(weeks)))
-    ax.set_xticklabels(weeks, fontsize=8)
+    ax.set_xticklabels(weeks, fontsize=8.3)
+    ax.tick_params(axis="x", labelcolor=INK2)
     ax.set_xlim(-0.5, len(weeks) - 0.5)
     seen = set()
     for k, y in enumerate(years):
@@ -325,16 +327,19 @@ def draw_main_chart(s: dict) -> bytes:
     x = np.arange(n)
     cap, op, phys = s["cap"], s["op"], s["phys"]
 
-    fig = plt.figure(figsize=(FIG_W, 10.4), facecolor=SURFACE)
-    gs = fig.add_gridspec(3, 1, height_ratios=[3.1, 1.75, 1.0], hspace=0.44,
-                          left=LEFT, right=RIGHT, top=0.858, bottom=0.075)
+    fig = plt.figure(figsize=(FIG_W, 10.0), facecolor=SURFACE)
+    gs = fig.add_gridspec(3, 1, height_ratios=[3.1, 1.6, 0.95], hspace=0.5,
+                          left=LEFT, right=RIGHT, top=0.862, bottom=0.075)
     ax_a = fig.add_subplot(gs[0])
     ax_b = fig.add_subplot(gs[1], sharex=ax_a)
     ax_c = fig.add_subplot(gs[2], sharex=ax_a)
     for ax in (ax_a, ax_b, ax_c):
         _style_axis(ax)
-    ax_a.tick_params(labelbottom=False)
+    # Week labels sit right under the capacity panel (and again under the shipments),
+    # and a hairline per week lets the eye drop from each point to its CW.
+    ax_a.tick_params(labelbottom=True)
     ax_b.tick_params(labelbottom=False)
+    ax_a.grid(axis="x", color=GRID, linewidth=0.7)
 
     # ---- Figure title (keeps the PNG self-explanatory when pasted into slides) ----
     b1, b2 = s["batches"]
@@ -376,35 +381,68 @@ def draw_main_chart(s: dict) -> bytes:
                   **{**line_kw, "markersize": 4.6, "linewidth": 1.8})
 
     y_top = max(cap.max(), dem.max() if dem.size else 0) * 1.28 or 1
-    ax_a.set_ylim(0, y_top)
-    ax_a.yaxis.set_major_locator(MaxNLocator(5))
+    # With every point labeled, leave a strip under zero so the lowest labels never hit the axis.
+    y_bottom = -0.09 * y_top if p.label_all else 0.0
+    ax_a.set_ylim(y_bottom, y_top)
+    ax_a.set_yticks([t for t in MaxNLocator(5).tick_values(0, y_top) if 0 <= t <= y_top])
     ax_a.yaxis.set_major_formatter(plt.FuncFormatter(lambda v, _: f"{v:,.0f}"))
+    if y_bottom < 0:
+        ax_a.spines["bottom"].set_visible(False)
+        ax_a.axhline(0, color=BASELINE, linewidth=0.9, zorder=1)
 
-    def end_label(xv, yv, text):
-        ax_a.annotate(text, (xv, yv), xytext=(9, 0), textcoords="offset points", ha="left",
-                      va="center", fontsize=9, fontweight=600, color=INK, zorder=7,
-                      annotation_clip=False,
-                      bbox=dict(boxstyle="round,pad=0.18", fc=SURFACE, ec="none", alpha=0.9))
+    px = fig.dpi / 72.0  # pixels per point
 
-    end_label(n - 1, cap[-1], f"Capacity {fmt(cap[-1], dec)}")
+    def y_px(xv, yv):
+        return ax_a.transData.transform((xv, yv))[1]
+
+    # ---- End labels; stacked apart when two series end on the same week ----
+    sdec = 1 if dec else 0
+    ends = [(n - 1, cap[-1], f"Capacity {fmt(cap[-1], dec)}")]
     if xd.size:
-        end_label(xd[-1], dem[-1], f"Demand {fmt(dem[-1], dec)}")
+        ends.append((xd[-1], dem[-1], f"Demand {fmt(dem[-1], dec)}"))
         if p.scrap_on:
-            end_label(xd[-1], scrap[-1], f"Scrap {fmt(scrap[-1], 1 if dec else 0)}")
+            ends.append((xd[-1], scrap[-1], f"Scrap {fmt(scrap[-1], sdec)}"))
+    for xv in {e[0] for e in ends}:
+        floor = None
+        for _, yv, text in sorted((e for e in ends if e[0] == xv), key=lambda e: e[1]):
+            natural = y_px(xv, yv)
+            target = natural if floor is None else max(natural, floor + 14 * px)
+            floor = target
+            ax_a.annotate(text, (xv, yv), xytext=(9, (target - natural) / px), textcoords="offset points",
+                          ha="left", va="center", fontsize=9, fontweight=600, color=INK, zorder=8,
+                          annotation_clip=False,
+                          bbox=dict(boxstyle="round,pad=0.18", fc=SURFACE, ec="none", alpha=0.9))
 
     if p.label_all:
+        # Per week: the highest series is labeled above its point, the lowest below, and
+        # the one in the middle goes to whichever side has more room (or to the right if
+        # neither side has room). Labels never face each other, so they can't collide.
+        series = [(list(cap), lambda v: fmt(v, dec), CAP_TEXT, {n - 1}),
+                  (s["demand"], lambda v: fmt(v, dec), DEM_TEXT, {ref_k})]
+        if p.scrap_on:
+            series.append((s["scrap_conv"], lambda v: fmt(v, sdec), VIOLET, {ref_k}))
+        room = (7.6 + 5) * px + 3
+        placements = {"up": dict(xytext=(0, 4.5), ha="center", va="bottom"),
+                      "down": dict(xytext=(0, -4.5), ha="center", va="top"),
+                      "right": dict(xytext=(7, 0), ha="left", va="center")}
         for k in range(n):
-            if k != n - 1:
-                ax_a.annotate(fmt(cap[k], dec), (k, cap[k]), xytext=(0, -11), textcoords="offset points",
-                              ha="center", va="top", fontsize=7.3, color=INK2, zorder=6)
-        for j, k in enumerate(xd[:-1]):
-            if dem[j] > 0:
-                ax_a.annotate(fmt(dem[j], dec), (k, dem[j]), xytext=(0, 9), textcoords="offset points",
-                              ha="center", va="bottom", fontsize=7.3, color=INK2, zorder=6)
-            if p.scrap_on and scrap[j] > 0:
-                ax_a.annotate(fmt(scrap[j], 1 if dec else 0), (k, scrap[j]), xytext=(0, 8),
-                              textcoords="offset points", ha="center", va="bottom", fontsize=6.8,
-                              color=INK2, zorder=6)
+            pts = sorted(((v, y_px(k, v), fmt_fn(v), color)
+                          for vals, fmt_fn, color, skip in series
+                          for v in [vals[k]] if v is not None and v > 0 and k not in skip),
+                         key=lambda t: -t[1])
+            for i, (v, ypix, text, color) in enumerate(pts):
+                if i == 0:
+                    side = "up"
+                elif i == len(pts) - 1:
+                    side = "down"
+                else:
+                    gap_up, gap_down = pts[i - 1][1] - ypix, ypix - pts[i + 1][1]
+                    side = ("right" if max(gap_up, gap_down) < room
+                            else "up" if gap_up >= gap_down else "down")
+                ax_a.annotate(text, (k, v), textcoords="offset points", fontsize=7.6, fontweight=600,
+                              color=color, zorder=7,
+                              bbox=dict(boxstyle="round,pad=0.12", fc=SURFACE, ec="none", alpha=0.85),
+                              **placements[side])
     else:
         # One call-out: the tightest week (or the worst shortfall).
         k = s["tight_k"]
