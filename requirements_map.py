@@ -1,13 +1,17 @@
 """Trolley requirements by station - schematic plant map rendered as a single SVG.
 
 Coordinates are in the space of the plant layout drawing (approx. 1100 x 660 units).
-The map is a simplified schematic: cluster zones, access gates for orientation, the
-docking points where Production requested a trolley, and the support areas.
-Edit the data blocks below to update the graphic.
+The map is a simplified schematic: cluster zones, access gates for orientation, every
+docking station (the ones where Production requested a trolley highlighted), the support
+areas and, optionally, the real conveyor layout as a faint background.
+Docking positions come from colour detection on the flags-only layout, registered to this
+coordinate space. Edit the data blocks below to update the graphic.
 """
 from __future__ import annotations
 
+import base64
 from html import escape
+from pathlib import Path
 
 # ----------------------------------------------------------------------------- data
 CLUSTERS = {
@@ -15,7 +19,7 @@ CLUSTERS = {
           "zone": [(152, 72), (816, 72), (816, 190), (152, 190)], "label": (246, 92)},
     "E": {"color": "#eda100", "ink": "#2b1f00",
           "zone": [(816, 72), (973, 72), (973, 320), (482, 320), (482, 190), (816, 190)],
-          "label": (676, 206)},
+          "label": (560, 240)},
     "H": {"color": "#eb6834", "ink": "#ffffff",
           "zone": [(152, 190), (482, 190), (482, 320), (350, 320), (350, 633), (152, 633)],
           "label": (198, 340)},
@@ -25,15 +29,28 @@ CLUSTERS = {
           "zone": [(705, 320), (973, 320), (973, 633), (705, 633)], "label": (862, 336)},
 }
 
-# Docking points where a trolley was requested (one trolley each): cluster, x, y, station flag.
+# Docking stations where a trolley was requested (one trolley each): cluster, x, y, station flag.
 DOCKING_POINTS = [
-    ("C", 656, 171, "759"), ("C", 806, 166, "789"),
-    ("E", 583, 297, "809"), ("E", 901, 158, "719"),
-    ("H", 387, 202, "859"), ("H", 348, 257, "729"), ("H", 168, 509, "979"),
-    ("F", 615, 348, "739 / 759"), ("F", 619, 530, "749"), ("F", 673, 548, "769"),
-    ("F", 700, 576, "789"), ("F", 349, 587, "719"),
-    ("P", 838, 424, None), ("P", 938, 444, "819"), ("P", 740, 486, "729"), ("P", 934, 495, "769"),
-    ("P", 772, 533, "799"), ("P", 849, 568, "749"), ("P", 915, 597, "759"),
+    ("C", 655, 170, "759"), ("C", 815, 163, "789"),
+    ("E", 588, 296, "809"), ("E", 906, 160, "719"),
+    ("H", 389, 202, "859"), ("H", 351, 253, "729"), ("H", 170, 508, "979"),
+    ("F", 615, 346, "739 / 759"), ("F", 626, 529, "749"), ("F", 679, 548, "769"),
+    ("F", 703, 574, "789"), ("F", 351, 593, "719"),
+    ("P", 843, 428, None), ("P", 948, 446, "819"), ("P", 743, 486, "729"), ("P", 942, 492, "769"),
+    ("P", 774, 525, "799"), ("P", 857, 568, "749"), ("P", 923, 598, "759"),
+]
+
+# Docking stations on the layout where no trolley was requested.
+UNUSED_POINTS = [
+    ("C", 160, 89, "719"), ("C", 700, 103, "769"), ("C", 757, 178, "77"),
+    ("E", 836, 122, "709"), ("E", 496, 199, "829"), ("E", 547, 202, "819"), ("E", 639, 214, "779"),
+    ("E", 724, 214, "759"), ("E", 512, 273, "839"), ("E", 834, 278, "72"), ("E", 639, 304, "789"),
+    ("E", 724, 306, "769"),
+    ("H", 273, 198, "829"), ("H", 221, 212, None), ("H", 476, 218, "719"), ("H", 237, 283, "789"),
+    ("H", 238, 426, "909"), ("H", 336, 433, "879"), ("H", 311, 473, "949"), ("H", 243, 511, "969"),
+    ("H", 219, 590, "989"),
+    ("F", 651, 500, "739"), ("F", 514, 615, "729"),
+    ("P", 742, 372, "719"), ("P", 899, 490, "789"), ("P", 885, 558, "779"), ("P", 749, 608, "739"),
 ]
 
 # Support areas outside the production floor: key, label, trolleys, box, accent.
@@ -56,6 +73,14 @@ GATES = [
 
 PLANT = (150, 70, 825, 565)  # x, y, w, h
 
+# Real conveyor layout as a faint background (see tools/make_layout_shadow.py).
+# Placement comes from registering the raw drawing to this coordinate space.
+SHADOW_FILE = Path(__file__).resolve().parent / "assets" / "layout_shadow.png"
+SHADOW_PLACEMENT = (139.25, 39.80, 1117 * 0.7592, 779 * 0.7592)  # x, y, w, h
+SHADOW_OPACITY = 0.30
+SELECTION_NOTE = ("Trolleys sit where NOK parts can no longer move forward: "
+                  "the downstream stations are not built to pass scrap")
+
 # ----------------------------------------------------------------------------- style
 FONT = "Inter, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
 INK, INK2, MUTED, LINE = "#0b0b0b", "#52514e", "#898781", "#d9d8d1"
@@ -75,7 +100,15 @@ def totals() -> dict:
     counts = cluster_counts()
     clusters = sum(counts.values())
     support = sum(a["trolleys"] for a in SUPPORT_AREAS)
-    return {"clusters": clusters, "support": support, "total": clusters + support, "by_cluster": counts}
+    stations = len(DOCKING_POINTS) + len(UNUSED_POINTS)
+    return {"clusters": clusters, "support": support, "total": clusters + support, "by_cluster": counts,
+            "stations": stations}
+
+
+def _shadow_href() -> str | None:
+    if not SHADOW_FILE.exists():
+        return None
+    return "data:image/png;base64," + base64.b64encode(SHADOW_FILE.read_bytes()).decode("ascii")
 
 
 def _t(x, y, text, size=12, weight=400, fill=INK, anchor="start", extra=""):
@@ -88,7 +121,7 @@ def _chip(x, y, size, color, ink, letter, radius=6):
             + _t(x + size / 2, y + size / 2 + size * 0.17, letter, size * 0.5, 700, ink, "middle"))
 
 
-def build_svg() -> str:
+def build_svg(show_layout: bool = True) -> str:
     tot = totals()
     counts = tot["by_cluster"]
     out = [f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {CANVAS_W} {CANVAS_H}" '
@@ -101,6 +134,8 @@ def build_svg() -> str:
                '<filter id="tr-shadow" x="-20%" y="-20%" width="140%" height="160%">'
                '<feDropShadow dx="0" dy="1.5" stdDeviation="2" flood-color="#0b0b0b" flood-opacity="0.18"/>'
                '</filter>'
+               f'<clipPath id="tr-plant"><rect x="{PLANT[0]}" y="{PLANT[1]}" width="{PLANT[2]}" '
+               f'height="{PLANT[3]}" rx="10"/></clipPath>'
                '<marker id="tr-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" '
                'orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#a9a79f"/></marker>'
                '</defs>')
@@ -108,18 +143,24 @@ def build_svg() -> str:
 
     # ---- heading
     out.append(_t(40, 44, "Trolley requirements by station", 26, 700, INK, extra='letter-spacing="-0.4"'))
-    out.append(_t(40, 68, "Docking points where Production requested a trolley, plus support areas", 14, 400, INK2))
+    out.append(_t(40, 68, SELECTION_NOTE, 14, 400, INK2))
 
     # ---- map
     g = [f'<g transform="translate({MAP_DX},{MAP_DY})">']
     px, py, pw, ph = PLANT
     g.append(f'<rect x="{px}" y="{py}" width="{pw}" height="{ph}" rx="10" fill="#fbfbfa" stroke="#c3c2b7" '
              f'stroke-width="1.4"/>')
-    g.append(f'<rect x="{px}" y="{py}" width="{pw}" height="{ph}" rx="10" fill="url(#tr-grid)"/>')
+    shadow = _shadow_href() if show_layout else None
+    if not shadow:
+        g.append(f'<rect x="{px}" y="{py}" width="{pw}" height="{ph}" rx="10" fill="url(#tr-grid)"/>')
     for key, c in CLUSTERS.items():
         pts = " ".join(f"{x},{y}" for x, y in c["zone"])
-        g.append(f'<polygon points="{pts}" fill="{c["color"]}" fill-opacity="0.13" stroke="#ffffff" '
-                 f'stroke-width="4" stroke-linejoin="round"/>')
+        g.append(f'<polygon points="{pts}" fill="{c["color"]}" fill-opacity="{0.11 if shadow else 0.13}" '
+                 f'stroke="#ffffff" stroke-width="4" stroke-linejoin="round"/>')
+    if shadow:
+        sx, sy, sw, sh = SHADOW_PLACEMENT
+        g.append(f'<image href="{shadow}" x="{sx:.2f}" y="{sy:.2f}" width="{sw:.2f}" height="{sh:.2f}" '
+                 f'opacity="{SHADOW_OPACITY}" preserveAspectRatio="none" clip-path="url(#tr-plant)"/>')
     for key, c in CLUSTERS.items():  # zone outlines on top of the white gaps, very light
         pts = " ".join(f"{x},{y}" for x, y in c["zone"])
         g.append(f'<polygon points="{pts}" fill="none" stroke="{c["color"]}" stroke-opacity="0.35" '
@@ -134,6 +175,13 @@ def build_svg() -> str:
                         f'transform="rotate(-90 {cx} {cy})"'))
         else:
             g.append(_t(x + w / 2, y + h / 2 + 3.5, label, 9.5, 500, "#ffffff", "middle"))
+
+    # docking stations without a request: quiet, hollow
+    for key, x, y, flag in UNUSED_POINTS:
+        tip = f"Cluster {key} docking station" + (f" · flag {flag}" if flag else "") + " · no trolley requested"
+        g.append(f'<g><title>{escape(tip)}</title>'
+                 f'<circle cx="{x}" cy="{y}" r="7.5" fill="#ffffff" stroke="#9b9990" stroke-width="1.6"/>'
+                 + _t(x, y + 3, key, 8, 700, "#8a887f", "middle") + '</g>')
 
     # cluster labels
     for key, c in CLUSTERS.items():
@@ -203,9 +251,9 @@ def build_svg() -> str:
     out.append(f'<rect x="{x0}" y="{split_y}" width="{cw - 2}" height="10" rx="5" fill="#184f95"/>')
     out.append(f'<rect x="{x0 + cw}" y="{split_y}" width="{w - cw}" height="10" rx="5" fill="#4a3aa7"/>')
     for col, (n, line1, line2, color) in enumerate((
-            (tot["clusters"], "at docking points", "in 5 production clusters", "#184f95"),
+            (tot["clusters"], "at docking stations", f"of {tot['stations']} stations, 5 clusters", "#184f95"),
             (tot["support"], "at support areas", "Scrap, Rework, Quality", "#4a3aa7"))):
-        cx = x0 + col * (w / 2 + 10)
+        cx = x0 + col * (w / 2 + 20)
         out.append(f'<circle cx="{cx + 5}" cy="{split_y + 30}" r="5" fill="{color}"/>')
         out.append(_t(cx + 16, split_y + 37, n, 22, 700, INK))
         out.append(_t(cx + 48, split_y + 37, line1, 12.5, 400, INK2))
@@ -242,12 +290,14 @@ def build_svg() -> str:
     lx = MAP_DX + PLANT[0]
     out.append(f'<circle cx="{lx + 10}" cy="{ly}" r="13" fill="#2a78d6" fill-opacity="0.22"/>'
                f'<circle cx="{lx + 10}" cy="{ly}" r="8" fill="#2a78d6" stroke="#ffffff" stroke-width="2"/>')
-    out.append(_t(lx + 30, ly + 4.5, "Docking point where a trolley is required (1 each)", 12, 400, INK2))
-    out.append(f'<rect x="{lx + 350}" y="{ly - 9}" width="26" height="18" rx="5" fill="#f0efea" '
+    out.append(_t(lx + 30, ly + 4.5, "Trolley requested (1 per station)", 12, 400, INK2))
+    out.append(f'<circle cx="{lx + 252}" cy="{ly}" r="7" fill="#ffffff" stroke="#9b9990" stroke-width="1.6"/>')
+    out.append(_t(lx + 268, ly + 4.5, "Docking station, not requested", 12, 400, INK2))
+    out.append(f'<rect x="{lx + 476}" y="{ly - 9}" width="26" height="18" rx="5" fill="#f0efea" '
                f'stroke="#52514e" stroke-width="1"/>')
-    out.append(_t(lx + 386, ly + 4.5, "Support area (approximate location)", 12, 400, INK2))
-    out.append(f'<rect x="{lx + 612}" y="{ly - 9}" width="26" height="18" rx="3" fill="#4a4945"/>')
-    out.append(_t(lx + 648, ly + 4.5, "Access / WPC", 12, 400, INK2))
+    out.append(_t(lx + 510, ly + 4.5, "Support area (approx. location)", 12, 400, INK2))
+    out.append(f'<rect x="{lx + 712}" y="{ly - 9}" width="26" height="18" rx="3" fill="#4a4945"/>')
+    out.append(_t(lx + 746, ly + 4.5, "Access / WPC", 12, 400, INK2))
     out.append('</svg>')
     return "".join(out)
 

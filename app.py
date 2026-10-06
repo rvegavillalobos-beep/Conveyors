@@ -666,6 +666,8 @@ with st.sidebar.expander("Display", expanded=True):
     unit_mode = st.selectbox("Unit format", UNIT_OPTIONS)
     label_all = st.checkbox("Label every data point", value=False,
                             help="Off: only the key call-outs are labeled (cleaner for presenting).")
+    show_layout = st.toggle("Show conveyor layout behind the map", value=True,
+                            help="Faint background of the real plant layout in the requirements map.")
 
 with st.sidebar.expander("Fleet & adjustment", expanded=True):
     base_fleet = st.number_input("Base fleet (trolleys today)", min_value=20, max_value=60, value=35, step=5)
@@ -730,7 +732,12 @@ def kpi(label: str, value: str, unit_txt: str = "", sub: str = "") -> str:
 
 
 # ---------------------------------------------------------------- Trolley requirements (top)
-req_svg = requirements_map.build_svg()
+@st.cache_data(show_spinner=False)
+def requirements_svg(show_layout: bool) -> str:
+    return requirements_map.build_svg(show_layout=show_layout)
+
+
+req_svg = requirements_svg(bool(show_layout))
 st.markdown(f'<div class="tcr-req">{req_svg}</div>', unsafe_allow_html=True)
 st.download_button("Download requirements map (SVG)", data=req_svg.encode("utf-8"),
                    file_name="trolley_requirements_by_station.svg", mime="image/svg+xml")
