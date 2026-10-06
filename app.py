@@ -23,7 +23,13 @@ from matplotlib.patches import Patch  # noqa: E402
 from matplotlib.ticker import MaxNLocator  # noqa: E402
 from matplotlib.transforms import blended_transform_factory  # noqa: E402
 
+import importlib  # noqa: E402
+
 import requirements_map  # noqa: E402
+
+# Streamlit keeps imported modules in memory across reruns; reload so a redeploy
+# always picks up the current requirements_map.py without rebooting the app.
+requirements_map = importlib.reload(requirements_map)
 
 APP_DIR = Path(__file__).parent
 
