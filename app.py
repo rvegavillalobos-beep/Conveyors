@@ -694,7 +694,6 @@ CSS = """
 .tcr-delta.bad{color:#a12a2a;background:#fbeaea}
 .tcr-delta.flat{color:#52514e;background:#f0efea}
 .tcr-imp-sub{font-size:12px;color:#52514e;line-height:1.45;margin-top:9px}
-.tcr-imp-note{font-size:12px;color:#898781;line-height:1.5;margin-top:12px}
 </style>
 """
 st.markdown(CSS, unsafe_allow_html=True)
@@ -913,16 +912,12 @@ actions_html = "".join(
     for title, detail, chg in ACTIONS)
 
 st.markdown('<div style="height:10px"></div>', unsafe_allow_html=True)
-with expander(f"Actions since the last review · {len(ACTIONS)} completed", icon=":material/fact_check:"):
+with expander("Actions since the last review", icon=":material/fact_check:"):
     st.markdown(
         '<div class="tcr tcr-actions">'
         f'<div><div class="tcr-col-head">What we did</div>{actions_html}</div>'
         '<div><div class="tcr-col-head">What changed</div>'
         f'<div class="tcr-imp-grid">{"".join(tiles)}</div>'
-        f'<div class="tcr-imp-note">Before: previous plan, with Batch 1 shipping {PREVIOUS_PLAN["b1_ship"]} '
-        f'(on site {b1_prev.arrival_label}) and adjustment paused during the shutdown. After: current scenario. '
-        'Same model and settings otherwise. Supplier pre-adjustment is not part of the model, so the effect '
-        'shown is conservative.</div>'
         '</div></div>',
         unsafe_allow_html=True,
     )
