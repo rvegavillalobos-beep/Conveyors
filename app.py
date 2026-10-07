@@ -721,7 +721,7 @@ with st.sidebar.expander("Shipments & customs", expanded=True):
     st.markdown("**Batch 1**")
     batch1_qty = st.number_input("Batch 1 quantity", min_value=10, max_value=50, value=30, step=2)
     batch1_start_week = st.selectbox("Batch 1 shipment week", SHIP_WEEK_OPTIONS,
-                                     index=SHIP_WEEK_OPTIONS.index("CW45"), key="b1_start")
+                                     index=SHIP_WEEK_OPTIONS.index(ACTION_BASELINE["b1_ship"]), key="b1_start")
     batch1_customs = st.slider("Batch 1 customs (weeks)", min_value=1, max_value=2, value=2, key="b1_customs")
     st.markdown("**Batch 2**")
     batch2_qty = st.number_input("Batch 2 quantity", min_value=10, max_value=60, value=30, step=2)
@@ -905,12 +905,9 @@ def build_actions(p: Params) -> list:
     """Action rows (title, detail, (before, after) or None); quantified ones follow the sidebar."""
     base = ACTION_BASELINE
     shift = WEEK_LABELS.index(base["b1_ship"]) - WEEK_LABELS.index(p.b1_ship)
-    if shift > 0:
-        ship = ("Batch 1 shipment pulled ahead", f"Ships {plural(shift, 'week')} earlier")
-    elif shift < 0:
-        ship = ("Batch 1 shipment moved", f"Ships {plural(-shift, 'week')} later")
-    else:
-        ship = ("Batch 1 shipment confirmed", f"Ships in {p.b1_ship}, as planned")
+    ship = (("Batch 1 shipment pulled ahead", f"Ships {plural(shift, 'week')} earlier") if shift > 0 else
+            ("Batch 1 shipment moved", f"Ships {plural(-shift, 'week')} later") if shift < 0 else
+            None)  # unchanged since the last review: not an action, so not listed
     dq = p.b1_qty - base["b1_qty"]
     qty = (("Batch 1 quantity increased", "More trolleys in the first shipment") if dq > 0 else
            ("Batch 1 quantity reduced", "Fewer trolleys in the first shipment") if dq < 0 else
@@ -919,8 +916,8 @@ def build_actions(p: Params) -> list:
     rate = (("Adjustment rate increased", "More trolleys adjusted on site every week") if dr > 0 else
             ("Adjustment rate reduced", "Fewer trolleys adjusted on site every week") if dr < 0 else
             ("Adjustment rate confirmed", "Same number of trolleys adjusted on site every week"))
-    return [
-        (*ship, (base["b1_ship"], p.b1_ship)),
+    rows = [(*ship, (base["b1_ship"], p.b1_ship))] if ship else []
+    return rows + [
         (*qty, (str(base["b1_qty"]), f"{p.b1_qty} trolleys")),
         ("Supplier pre-adjusts trolleys", "Aligned with the supplier so trolleys arrive pre-adjusted, "
                                           "reducing the adjustment workload on site", None),
