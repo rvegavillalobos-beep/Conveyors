@@ -73,6 +73,8 @@ UNIT_CFG = {
 
 # Plan presented at the previous review (two weeks ago): baseline for "What changed".
 PREVIOUS_PLAN = {"b1_qty": 24, "b1_ship": "CW46", "rate": 2}
+# Checkpoints for operational trolleys in "What changed".
+CHECKPOINT_WEEKS = ("CW3", "CW6")
 
 # Actions taken since the previous review: title, detail, (before, after) or None.
 ACTIONS = [
@@ -691,6 +693,7 @@ CSS = """
 .tcr-delta.good{color:#006300;background:#e8f4e8}
 .tcr-delta.bad{color:#a12a2a;background:#fbeaea}
 .tcr-delta.flat{color:#52514e;background:#f0efea}
+.tcr-imp-sub{font-size:12px;color:#52514e;line-height:1.45;margin-top:9px}
 .tcr-imp-note{font-size:12px;color:#898781;line-height:1.5;margin-top:12px}
 </style>
 """
@@ -705,7 +708,7 @@ with st.sidebar.expander("Display", expanded=True):
                             help="Off: only the key call-outs are labeled (cleaner for presenting).")
 
 with st.sidebar.expander("Fleet & adjustment", expanded=True):
-    base_fleet = st.number_input("Base fleet (trolleys today)", min_value=20, max_value=60, value=35, step=5)
+    base_fleet = st.number_input("Base fleet (trolleys today)", min_value=20, max_value=60, value=36, step=1)
     target_trolleys_for_30_uph = st.slider("Trolleys required for 30 UPH", min_value=60, max_value=200,
                                            value=90, step=5)
     adjustment_rate = st.slider("Mechanical adjustment rate (trolleys / week)", min_value=1, max_value=10,
@@ -848,13 +851,14 @@ def count_shift(before: float, after: float, unit_txt: str, decimals: int = 0) -
     return f"{fmt_signed(d, decimals)} {unit_txt}", "good" if d > 0 else "bad"
 
 
-def impact_tile(label: str, before: str, after: str, delta: tuple[str, str]) -> str:
+def impact_tile(label: str, before: str, after: str, delta: tuple[str, str], note: str = "") -> str:
     text, tone = delta
     icon = {"good": "▲", "bad": "▼", "flat": "–"}[tone]
+    note_html = f'<div class="tcr-imp-sub">{note}</div>' if note else ""
     return (f'<div class="tcr-imp"><div class="tcr-imp-label">{label}</div>'
             f'<div class="tcr-imp-vals"><span class="old">{before}</span><span class="arr">→</span>'
             f'<span class="new">{after}</span></div>'
-            f'<span class="tcr-delta {tone}">{icon} {text}</span></div>')
+            f'<span class="tcr-delta {tone}">{icon} {text}</span>{note_html}</div>')
 
 
 CHECK_SVG = ('<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M3.5 8.4l2.9 2.9 '
@@ -865,26 +869,24 @@ prev = build_scenario(replace(params, **PREVIOUS_PLAN))
 b1_now, b1_prev = s["batches"][0], prev["batches"][0]
 
 
-def fleet_ready(scn: dict):
-    idx = [b.ready_idx for b in scn["batches"]]
-    return None if None in idx else max(idx)
+def op_at(scn: dict, week: str) -> int:
+    return int(scn["op"][scn["weeks"].index(week)])
 
 
-def label_of(idx) -> str:
-    return WEEK_LABELS[idx] if idx is not None else "after CW52"
-
-
-ref_now, ref_prev = s["ref_k"], prev["ref_k"]
-ref_week = weeks[ref_now]
+cp_mid, cp_end = CHECKPOINT_WEEKS
+b1_ready_note = (f"Batch 1 fully operational in {b1_now.ready_label} (was {b1_prev.ready_label})"
+                 if b1_now.ready_idx is not None else "")
 tiles = [
-    impact_tile("Batch 1 fully operational", b1_prev.ready_label, b1_now.ready_label,
-                week_shift(b1_prev.ready_idx, b1_now.ready_idx)),
-    impact_tile("Whole fleet operational", label_of(fleet_ready(prev)), label_of(fleet_ready(s)),
-                week_shift(fleet_ready(prev), fleet_ready(s))),
-    impact_tile(f"Operational trolleys at {ref_week}", f"{prev['op'][ref_prev]}", f"{s['op'][ref_now]}",
-                count_shift(prev["op"][ref_prev], s["op"][ref_now], "trolleys")),
-    impact_tile(f"Capacity at {ref_week}", fmt(prev["cap"][ref_prev], dec), f"{fmt(s['cap'][ref_now], dec)} {u}",
-                count_shift(prev["cap"][ref_prev], s["cap"][ref_now], u, dec)),
+    impact_tile("Batch 1 on site", b1_prev.arrival_label, b1_now.arrival_label,
+                week_shift(b1_prev.arrival_idx, b1_now.arrival_idx),
+                f"Adjustment ramp-up starts in {b1_now.arrival_label}"),
+    impact_tile(f"Operational trolleys at {cp_mid}", f"{op_at(prev, cp_mid)}", f"{op_at(s, cp_mid)}",
+                count_shift(op_at(prev, cp_mid), op_at(s, cp_mid), "trolleys")),
+    impact_tile(f"Operational trolleys at {cp_end}", f"{op_at(prev, cp_end)}", f"{op_at(s, cp_end)}",
+                count_shift(op_at(prev, cp_end), op_at(s, cp_end), "trolleys"), b1_ready_note),
+    impact_tile("Trolley & secondary-function KPIs", "Not measured", "Measured", ("Enabled by the app", "good"),
+                "Trolley use on the line and at Scrap center, Rework and Q-HUB, now measured and controlled "
+                "with certainty"),
 ]
 actions_html = "".join(
     f'<div class="tcr-act"><span class="tcr-act-ic">{CHECK_SVG}</span>'
@@ -901,10 +903,10 @@ with expander(f"Actions since the last review · {len(ACTIONS)} completed", icon
         f'<div><div class="tcr-col-head">What we did</div>{actions_html}</div>'
         '<div><div class="tcr-col-head">What changed</div>'
         f'<div class="tcr-imp-grid">{"".join(tiles)}</div>'
-        '<div class="tcr-imp-note">Model comparison of the current scenario against the plan from the last '
-        f'review (Batch 1: {PREVIOUS_PLAN["b1_qty"]} trolleys shipping {PREVIOUS_PLAN["b1_ship"]}, adjustment '
-        f'{PREVIOUS_PLAN["rate"]}/week), all other settings equal. Supplier pre-adjustment and app usage controls '
-        'are not part of the model, so the effect shown is conservative.</div>'
+        '<div class="tcr-imp-note">Trolley figures: model comparison of the current scenario against the plan '
+        f'from the last review (Batch 1: {PREVIOUS_PLAN["b1_qty"]} trolleys shipping {PREVIOUS_PLAN["b1_ship"]}, '
+        f'adjustment {PREVIOUS_PLAN["rate"]}/week), all other settings equal. Supplier pre-adjustment is not part '
+        'of the model, so the effect shown is conservative.</div>'
         '</div></div>',
         unsafe_allow_html=True,
     )
