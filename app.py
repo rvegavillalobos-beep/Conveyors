@@ -73,19 +73,13 @@ UNIT_CFG = {
 
 # Plan shown at the previous review: baseline for "What changed".
 # Batch 1 shipped CW46 (on site CW52) and adjustment paused during the shutdown.
-PREVIOUS_PLAN = {"b1_qty": 30, "b1_ship": "CW46", "rate": 5, "adjust_in_shutdown": False, "shutdown_rate": 0}
+PREVIOUS_PLAN = {"b1_qty": 30, "b1_ship": "CW46", "b1_customs": 2, "rate": 5,
+                 "adjust_in_shutdown": False, "shutdown_rate": 0}
 OP_TARGET = 50  # "50+ trolleys operational" milestone
 
-# Actions taken since the previous review: title, detail, (before, after) or None.
-ACTIONS = [
-    ("Batch 1 shipment pulled ahead", "Ships one week earlier", ("CW46", "CW45")),
-    ("Batch 1 quantity increased", "More trolleys in the first shipment", ("24", "30 trolleys")),
-    ("Supplier pre-adjusts trolleys", "Aligned with the supplier so trolleys arrive pre-adjusted, "
-                                      "reducing the adjustment workload on site", None),
-    ("Adjustment rate increased", "More trolleys adjusted on site every week", ("2", "5 / week")),
-    ("Trolley usage controls via app", "Control measures for trolley use created and implemented "
-                                       "through the app", None),
-]
+# Values before the actions (from the action list). The "after" side of every action is
+# read from the sidebar, so the panel always matches the scenario on screen.
+ACTION_BASELINE = {"b1_ship": "CW46", "b1_qty": 24, "rate": 2}
 
 SCRAP_MODES = [
     "Until the first batch arrives",
@@ -903,13 +897,54 @@ tiles = [
                 "Trolley use on the line and at Scrap center, Rework and Q-HUB, now measured and controlled "
                 "with certainty"),
 ]
+def plural(n: int, word: str) -> str:
+    return f"{n} {word}{'' if n == 1 else 's'}"
+
+
+def build_actions(p: Params) -> list:
+    """Action rows (title, detail, (before, after) or None); quantified ones follow the sidebar."""
+    base = ACTION_BASELINE
+    shift = WEEK_LABELS.index(base["b1_ship"]) - WEEK_LABELS.index(p.b1_ship)
+    if shift > 0:
+        ship = ("Batch 1 shipment pulled ahead", f"Ships {plural(shift, 'week')} earlier")
+    elif shift < 0:
+        ship = ("Batch 1 shipment moved", f"Ships {plural(-shift, 'week')} later")
+    else:
+        ship = ("Batch 1 shipment confirmed", f"Ships in {p.b1_ship}, as planned")
+    dq = p.b1_qty - base["b1_qty"]
+    qty = (("Batch 1 quantity increased", "More trolleys in the first shipment") if dq > 0 else
+           ("Batch 1 quantity reduced", "Fewer trolleys in the first shipment") if dq < 0 else
+           ("Batch 1 quantity confirmed", "Same number of trolleys in the first shipment"))
+    dr = p.rate - base["rate"]
+    rate = (("Adjustment rate increased", "More trolleys adjusted on site every week") if dr > 0 else
+            ("Adjustment rate reduced", "Fewer trolleys adjusted on site every week") if dr < 0 else
+            ("Adjustment rate confirmed", "Same number of trolleys adjusted on site every week"))
+    return [
+        (*ship, (base["b1_ship"], p.b1_ship)),
+        (*qty, (str(base["b1_qty"]), f"{p.b1_qty} trolleys")),
+        ("Supplier pre-adjusts trolleys", "Aligned with the supplier so trolleys arrive pre-adjusted, "
+                                          "reducing the adjustment workload on site", None),
+        (*rate, (str(base["rate"]), f"{p.rate} / week")),
+        ("Trolley usage controls via app", "Control measures for trolley use created and implemented "
+                                           "through the app", None),
+    ]
+
+
+def change_chip(chg) -> str:
+    if not chg:
+        return ""
+    before, after = chg
+    if before == after.split()[0]:  # unchanged: show the value only
+        return f'<div class="tcr-act-chg"><span class="new">{after}</span></div>'
+    return (f'<div class="tcr-act-chg"><span class="old">{before}</span><span class="arr">→</span>'
+            f'<span class="new">{after}</span></div>')
+
+
 actions_html = "".join(
     f'<div class="tcr-act"><span class="tcr-act-ic">{CHECK_SVG}</span>'
     f'<div class="tcr-act-body"><div class="tcr-act-title">{title}</div><div class="tcr-act-sub">{detail}</div></div>'
-    + (f'<div class="tcr-act-chg"><span class="old">{chg[0]}</span><span class="arr">→</span>'
-       f'<span class="new">{chg[1]}</span></div>' if chg else "")
-    + '</div>'
-    for title, detail, chg in ACTIONS)
+    f'{change_chip(chg)}</div>'
+    for title, detail, chg in build_actions(params))
 
 st.markdown('<div style="height:10px"></div>', unsafe_allow_html=True)
 with expander("Actions since the last review", icon=":material/fact_check:"):
