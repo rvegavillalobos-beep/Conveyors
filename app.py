@@ -145,7 +145,7 @@ class Params:
     scrap_mode: str
     scrap_range: tuple
     chart_layout: str = "combined"
-    y_max: int = 0  # left (trolley) axis maximum; 0 = automatic
+    chart_height: int = 100  # main chart height, % of the default proportion
 
 
 @dataclass
@@ -421,7 +421,7 @@ def _draw_split(s: dict) -> bytes:
     x = np.arange(n)
     cap, op, phys = s["cap"], s["op"], s["phys"]
 
-    fig = plt.figure(figsize=(FIG_W, 9.2), facecolor=SURFACE)
+    fig = plt.figure(figsize=(FIG_W, 9.2 * p.chart_height / 100), facecolor=SURFACE)
     gs = fig.add_gridspec(3, 1, height_ratios=[3.1, 1.6, 0.95], hspace=0.5,
                           left=LEFT, right=RIGHT, top=0.95, bottom=0.08)
     ax_a = fig.add_subplot(gs[0])
@@ -556,7 +556,7 @@ def _draw_split(s: dict) -> bytes:
     bar_kw = dict(width=0.62, edgecolor=SURFACE, linewidth=1.3, zorder=3)
     ax_b.bar(x, op, color=NAVY, **bar_kw)
     ax_b.bar(x, pending, bottom=op, color=PENDING, **bar_kw)
-    b_top = p.y_max or phys.max() * 1.22
+    b_top = phys.max() * 1.22
     ax_b.set_ylim(0, b_top)
     ax_b.yaxis.set_major_locator(MaxNLocator(4, integer=True))
     for k, v in enumerate(op):
@@ -592,7 +592,8 @@ def auto_y_max(phys) -> float:
 
 
 def _place_corner_block(fig, ax, ax2, leg, ttl, phys, arrival_ks) -> None:
-    """Drop the legend + title block until it rests just above the bars it covers."""
+    """Align the title + legend block's top with the tallest bar; lift it only if it would touch
+    the bars underneath it."""
     fig.canvas.draw()
     renderer = fig.canvas.get_renderer()
     px = fig.dpi / 72.0
@@ -604,7 +605,8 @@ def _place_corner_block(fig, ax, ax2, leg, ttl, phys, arrival_ks) -> None:
     gap, title_gap = 10 * px, 8 * px
     block_h = lb.height + title_gap + tb.height
     ceiling = ax2.transAxes.transform((0, 0.99))[1]
-    bottom = min(bar_top_px + gap, ceiling - block_h)
+    tallest_px = ax.transData.transform((0, float(phys.max())))[1]
+    bottom = min(max(tallest_px - block_h, bar_top_px + gap), ceiling - block_h)
     to_axes = ax2.transAxes.inverted()
     leg.set_bbox_to_anchor((0.0, to_axes.transform((0, bottom))[1]), transform=ax2.transAxes)
     ttl.set_position((0.008, to_axes.transform((0, bottom + lb.height + title_gap))[1]))
@@ -621,9 +623,11 @@ def _draw_combined(s: dict) -> bytes:
     cap, op, phys = s["cap"], s["op"], s["phys"]
     pending = phys - op
 
-    fig = plt.figure(figsize=(FIG_W, 7.9), facecolor=SURFACE)
-    gs = fig.add_gridspec(2, 1, height_ratios=[4.1, 0.95], hspace=0.06,
-                          left=LEFT, right=RIGHT, top=0.985, bottom=0.085)
+    main_in, gantt_in, gap_in, top_in, bottom_in = 5.6 * p.chart_height / 100, 1.3, 0.21, 0.12, 0.67
+    fig_h = main_in + gantt_in + gap_in + top_in + bottom_in
+    fig = plt.figure(figsize=(FIG_W, fig_h), facecolor=SURFACE)
+    gs = fig.add_gridspec(2, 1, height_ratios=[main_in, gantt_in], hspace=gap_in / ((main_in + gantt_in) / 2),
+                          left=LEFT, right=RIGHT, top=1 - top_in / fig_h, bottom=bottom_in / fig_h)
     ax = fig.add_subplot(gs[0])
     ax_c = fig.add_subplot(gs[1], sharex=ax)
     for a in (ax, ax_c):
@@ -635,14 +639,14 @@ def _draw_combined(s: dict) -> bytes:
     ax2.tick_params(axis="y", colors=MUTED, labelsize=8.5, length=0, pad=6)
 
     sd_note = f"adjusting {p.shutdown_rate}/wk" if p.adjust_in_shutdown else "adjustment paused"
-    _shade_shutdown((ax, ax_c), weeks)
+    _shade_shutdown((ax_c,), weeks)
     ref_k = s["ref_k"]
 
     # ---------------- bars: trolleys (left axis) ----------------
     bar_kw = dict(width=0.62, edgecolor=SURFACE, linewidth=1.3, zorder=2)
     ax.bar(x, op, color=NAVY, **bar_kw)
     ax.bar(x, pending, bottom=op, color=PENDING_SOFT, **bar_kw)
-    l_top = p.y_max or auto_y_max(phys)
+    l_top = auto_y_max(phys)
     ax.set_ylabel("Available trolleys", fontsize=9.5, color=INK2, labelpad=8)
     bar_label_y = {}  # week -> (y anchor in trolleys, "top"/"bottom") of the bar's value label
     for k, v in enumerate(op):
@@ -686,6 +690,11 @@ def _draw_combined(s: dict) -> bytes:
     bottom_pad = 0.075 if p.label_all else 0.0  # room under zero for the lowest labels
     ax.set_ylim(-bottom_pad * l_top, l_top)
     ax2.set_ylim(-bottom_pad * r_top, r_top)
+    sd_cols = [k for k, w in enumerate(weeks) if w in SHUTDOWN_WEEKS]
+    if sd_cols:  # shade stops at the height of the tallest bar, like the title block
+        ax.axvspan(min(sd_cols) - 0.5, max(sd_cols) + 0.5, ymin=0,
+                   ymax=(phys.max() + bottom_pad * l_top) / (l_top * (1 + bottom_pad)),
+                   color=SHUTDOWN_FILL, zorder=0, lw=0)
     ax.set_yticks([t for t in MaxNLocator(5, integer=True).tick_values(0, l_top) if 0 <= t <= l_top])
     if bottom_pad:
         ax.spines["bottom"].set_visible(False)
@@ -939,9 +948,9 @@ st.sidebar.markdown("### Scenario controls")
 
 with st.sidebar.expander("Display", expanded=True):
     unit_mode = st.selectbox("Unit format", UNIT_OPTIONS)
-    y_axis_choice = st.select_slider("Trolley axis maximum", options=["Auto"] + list(range(30, 251)),
-                                     value="Auto", help="Top of the left axis (trolleys), in steps of 1. Auto ends "
-                                                        "just above the tallest bar.")
+    chart_height = st.select_slider("Chart height", options=list(range(60, 161, 5)), value=100,
+                                    format_func=lambda v: f"{v}%",
+                                    help="Vertical proportion of the main chart (100% = default).")
     chart_layout = st.radio("Chart layout", ["Combined", "Split"], horizontal=True,
                             help="Combined: trolleys and capacity on one chart, as in the last review. "
                                  "Split: separate panels.")
@@ -994,7 +1003,7 @@ params = Params(
     b2_qty=int(batch2_qty), b2_ship=batch2_start_week, b2_customs=int(batch2_customs),
     scrap_on=bool(enable_scrap), scrap_pct=float(scrap_pct), scrap_mode=scrap_mode,
     scrap_range=tuple(scrap_range), chart_layout=chart_layout.lower(),
-    y_max=0 if y_axis_choice == "Auto" else int(y_axis_choice),
+    chart_height=int(chart_height),
 )
 s = build_scenario(params)
 CODE_VERSION = hashlib.md5(Path(__file__).read_bytes()).hexdigest()
