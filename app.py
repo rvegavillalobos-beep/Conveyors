@@ -19,6 +19,7 @@ import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 import streamlit as st  # noqa: E402
 from matplotlib import font_manager  # noqa: E402
+from matplotlib import patheffects as path_effects  # noqa: E402
 from matplotlib.lines import Line2D  # noqa: E402
 from matplotlib.patches import Patch  # noqa: E402
 from matplotlib.ticker import MaxNLocator  # noqa: E402
@@ -99,6 +100,11 @@ SHUTDOWN_FILL, NODATA_FILL = "#f0efea", "#f8f7f4"
 TRANSIT_FILL, CUSTOMS_FILL = "#f6e2ae", "#eda100"
 OUT_OF_WINDOW = "#dad8d1"
 CAP_TEXT, DEM_TEXT = "#1c5cab", "#a8461d"                   # darker steps for value labels
+# Combined chart: lines sit on top of navy bars, so they use warm/green hues with a white halo.
+CAP_LINE, CAP_LINE_TEXT = "#eb6834", "#a8461d"
+DEM_LINE, DEM_LINE_TEXT = "#1baf7a", "#0f7a52"
+PENDING_SOFT = "#b7d3f6"
+CAP_SHARE_OF_BAR = 0.45 # combined chart: capacity line height as a share of the navy bar
 
 FIG_W = 14.0
 LEFT, RIGHT = 0.078, 0.905
@@ -138,6 +144,7 @@ class Params:
     scrap_pct: float
     scrap_mode: str
     scrap_range: tuple
+    chart_layout: str = "combined"
 
 
 @dataclass
@@ -339,7 +346,67 @@ def _to_png(fig, dpi: int = 200) -> bytes:
     return buf.getvalue()
 
 
-def draw_main_chart(s: dict) -> bytes:
+def _draw_shipments(ax_c, s: dict) -> None:
+    """Gantt of both batches: transit, customs, adjustment and the week each is fully operational."""
+    weeks, n = s["weeks"], len(s["weeks"])
+    start_idx = WEEK_LABELS.index(weeks[0])
+    pt_per_week = (RIGHT - LEFT) * FIG_W * 72 / n
+    row_h = 0.58
+
+    def segment(y, x0, x1, color, labels):
+        x0c, x1c = max(x0, -0.5), min(x1, n - 0.5)
+        if x1c <= x0c:
+            return
+        ax_c.barh(y, x1c - x0c, left=x0c, height=row_h, color=color, edgecolor=SURFACE,
+                  linewidth=1.4, zorder=3)
+        width = (x1c - x0c) * pt_per_week
+        for lab in labels:
+            if text_pts(lab, 8) + 10 <= width:
+                ax_c.text((x0c + x1c) / 2, y, lab, ha="center", va="center", fontsize=8,
+                          fontweight=600, color=INK, zorder=4)
+                break
+
+    rows = {"Batch 1": 1, "Batch 2": 0}
+    for b in s["batches"]:
+        y = rows[b.name]
+        k_ship = b.ship_idx - start_idx
+        k_customs = k_ship + TRANSIT_WEEKS
+        k_arr = b.arrival_idx - start_idx
+        segment(y, k_ship, k_customs, TRANSIT_FILL, [f"Transit · {TRANSIT_WEEKS} wk", "Transit", "T"])
+        segment(y, k_customs, k_arr, CUSTOMS_FILL, [f"Customs · {b.customs} wk", "Customs", "C"])
+        if b.ready_idx is not None and b.ready_idx - start_idx <= n - 1:
+            k_ready = b.ready_idx - start_idx
+            segment(y, k_arr, k_ready, PENDING, ["Adjustment", "Adj."])
+            ax_c.plot(k_ready, y, marker="D", ms=7.5, color=NAVY, mec=SURFACE, mew=1.5, zorder=5)
+            ax_c.text(k_ready, y + row_h / 2 + 0.07, f"Ready {b.ready_label}", ha="center", va="bottom",
+                      fontsize=7.8, fontweight=600, color=INK, zorder=6, clip_on=False)
+        else:
+            segment(y, k_arr, n - 0.5, PENDING,
+                    [f"Adjustment · ready {b.ready_label} →", f"Ready {b.ready_label} →",
+                     f"{b.ready_label} →"])
+
+    ax_c.set_ylim(-0.6, 1.72)
+    ax_c.set_yticks([1, 0])
+    ax_c.set_yticklabels([f"{b.name}  +{b.qty}" for b in s["batches"]], fontsize=9, color=INK,
+                         fontweight=500)
+    ax_c.grid(False)
+    handles_c = [
+        Patch(facecolor=TRANSIT_FILL, label="Transit"),
+        Patch(facecolor=CUSTOMS_FILL, label="Customs"),
+        Patch(facecolor=PENDING, label="Adjustment"),
+        Line2D([0], [0], color="none", marker="D", ms=6.5, mfc=NAVY, mec=SURFACE, label="Fully operational"),
+    ]
+    _panel_header(ax_c, "Shipments & adjustment", handles_c)
+    _week_axis(ax_c, weeks, s["years"])
+
+    for b in s["batches"]:
+        k = b.arrival_idx - start_idx
+        if 0 <= k < n:
+            ax_c.axvline(k, color=NAVY, lw=1.0, alpha=0.45, zorder=2)
+
+
+def _draw_split(s: dict) -> bytes:
+    """Three stacked panels: capacity vs demand, fleet, shipments."""
     p, unit = s["p"], s["unit"]
     dec, u = unit["decimals"], unit["short"]
     weeks, n = s["weeks"], len(s["weeks"])
@@ -506,8 +573,7 @@ def draw_main_chart(s: dict) -> bytes:
     for b in s["batches"]:
         k = b.arrival_idx - (WEEK_LABELS.index(weeks[0]))
         if 0 <= k < n:
-            for ax in (ax_b, ax_c):
-                ax.axvline(k, color=NAVY, lw=1.0, alpha=0.45, zorder=2)
+            ax_b.axvline(k, color=NAVY, lw=1.0, alpha=0.45, zorder=2)
             ax_b.text(k, phys[k] + 0.03 * b_top, f"+{b.qty}", ha="center", va="bottom", fontsize=8.2,
                       fontweight=700, color=INK, zorder=6,
                       bbox=dict(boxstyle="round,pad=0.2", fc=SURFACE, ec="none", alpha=0.9))
@@ -519,58 +585,210 @@ def draw_main_chart(s: dict) -> bytes:
     ]
     _panel_header(ax_b, "Trolley fleet  ·  units", handles_b)
 
-    # ================= Panel C: shipments =================
-    start_idx = WEEK_LABELS.index(weeks[0])
-    pt_per_week = (RIGHT - LEFT) * FIG_W * 72 / n
-    row_h = 0.58
-
-    def segment(y, x0, x1, color, labels):
-        x0c, x1c = max(x0, -0.5), min(x1, n - 0.5)
-        if x1c <= x0c:
-            return
-        ax_c.barh(y, x1c - x0c, left=x0c, height=row_h, color=color, edgecolor=SURFACE,
-                  linewidth=1.4, zorder=3)
-        width = (x1c - x0c) * pt_per_week
-        for lab in labels:
-            if text_pts(lab, 8) + 10 <= width:
-                ax_c.text((x0c + x1c) / 2, y, lab, ha="center", va="center", fontsize=8,
-                          fontweight=600, color=INK, zorder=4)
-                break
-
-    rows = {"Batch 1": 1, "Batch 2": 0}
-    for b in s["batches"]:
-        y = rows[b.name]
-        k_ship = b.ship_idx - start_idx
-        k_customs = k_ship + TRANSIT_WEEKS
-        k_arr = b.arrival_idx - start_idx
-        segment(y, k_ship, k_customs, TRANSIT_FILL, [f"Transit · {TRANSIT_WEEKS} wk", "Transit", "T"])
-        segment(y, k_customs, k_arr, CUSTOMS_FILL, [f"Customs · {b.customs} wk", "Customs", "C"])
-        if b.ready_idx is not None and b.ready_idx - start_idx <= n - 1:
-            k_ready = b.ready_idx - start_idx
-            segment(y, k_arr, k_ready, PENDING, ["Adjustment", "Adj."])
-            ax_c.plot(k_ready, y, marker="D", ms=7.5, color=NAVY, mec=SURFACE, mew=1.5, zorder=5)
-            ax_c.text(k_ready, y + row_h / 2 + 0.07, f"Ready {b.ready_label}", ha="center", va="bottom",
-                      fontsize=7.8, fontweight=600, color=INK, zorder=6, clip_on=False)
-        else:
-            segment(y, k_arr, n - 0.5, PENDING,
-                    [f"Adjustment · ready {b.ready_label} →", f"Ready {b.ready_label} →",
-                     f"{b.ready_label} →"])
-
-    ax_c.set_ylim(-0.6, 1.72)
-    ax_c.set_yticks([1, 0])
-    ax_c.set_yticklabels([f"{b.name}  +{b.qty}" for b in s["batches"]], fontsize=9, color=INK,
-                         fontweight=500)
-    ax_c.grid(False)
-    handles_c = [
-        Patch(facecolor=TRANSIT_FILL, label="Transit"),
-        Patch(facecolor=CUSTOMS_FILL, label="Customs"),
-        Patch(facecolor=PENDING, label="Adjustment"),
-        Line2D([0], [0], color="none", marker="D", ms=6.5, mfc=NAVY, mec=SURFACE, label="Fully operational"),
-    ]
-    _panel_header(ax_c, "Shipments & adjustment", handles_c)
-    _week_axis(ax_c, weeks, s["years"])
-
+    _draw_shipments(ax_c, s)
     return _to_png(fig)
+
+
+def _draw_combined(s: dict) -> bytes:
+    """Fleet bars and capacity / demand / scrap lines on one panel (as in the previous review),
+    with the shipments Gantt underneath."""
+    p, unit = s["p"], s["unit"]
+    dec, u = unit["decimals"], unit["short"]
+    sdec = 1 if dec else 0
+    weeks, n = s["weeks"], len(s["weeks"])
+    x = np.arange(n)
+    cap, op, phys = s["cap"], s["op"], s["phys"]
+    pending = phys - op
+
+    fig = plt.figure(figsize=(FIG_W, 8.1), facecolor=SURFACE)
+    gs = fig.add_gridspec(2, 1, height_ratios=[3.5, 0.95], hspace=0.42,
+                          left=LEFT, right=RIGHT, top=0.905, bottom=0.085)
+    ax = fig.add_subplot(gs[0])
+    ax_c = fig.add_subplot(gs[1], sharex=ax)
+    for a in (ax, ax_c):
+        _style_axis(a)
+    ax.tick_params(labelbottom=True)
+    ax.tick_params(axis="x", labelcolor=INK2, labelsize=8.3)
+    ax2 = ax.twinx()
+    for side in ("top", "right", "left", "bottom"):
+        ax2.spines[side].set_visible(False)
+    ax2.tick_params(axis="y", colors=MUTED, labelsize=8.5, length=0, pad=6)
+
+    sd_note = f"adjusting {p.shutdown_rate}/wk" if p.adjust_in_shutdown else "adjustment paused"
+    _shade_shutdown((ax, ax_c), weeks, label_ax=ax, note=sd_note)
+    ref_k = s["ref_k"]
+    if ref_k < n - 1:
+        ax.axvspan(ref_k + 0.5, n - 0.5, color=NODATA_FILL, zorder=0, lw=0)
+        tr = blended_transform_factory(ax.transData, ax.transAxes)
+        ax.text((ref_k + 0.5 + n - 0.5) / 2, 0.975, f"No demand data after {weeks[ref_k]}",
+                transform=tr, ha="center", va="top", fontsize=8.2, color=MUTED, zorder=6)
+
+    # ---------------- bars: trolleys (left axis) ----------------
+    bar_kw = dict(width=0.62, edgecolor=SURFACE, linewidth=1.3, zorder=2)
+    ax.bar(x, op, color=NAVY, **bar_kw)
+    ax.bar(x, pending, bottom=op, color=PENDING_SOFT, **bar_kw)
+    l_top = max(phys.max(), p.trolleys_for_30) * 1.16
+    ax.set_ylabel("Available trolleys", fontsize=9.5, color=INK2, labelpad=8)
+    bar_label_y = {}  # week -> (y anchor in trolleys, "top"/"bottom") of the bar's value label
+    for k, v in enumerate(op):
+        if v >= 0.13 * l_top:
+            ax.text(k, v - 0.022 * l_top, str(v), ha="center", va="top", fontsize=7.8,
+                    fontweight=600, color=SURFACE, zorder=3)
+            bar_label_y[k] = (v - 0.022 * l_top, "top")
+        else:
+            ax.text(k, v + 0.012 * l_top, str(v), ha="center", va="bottom", fontsize=7.8,
+                    fontweight=600, color=INK, zorder=3)
+            bar_label_y[k] = (v + 0.012 * l_top, "bottom")
+    for b in s["batches"]:
+        k = b.arrival_idx - WEEK_LABELS.index(weeks[0])
+        if 0 <= k < n:
+            ax.text(k, phys[k] + 0.014 * l_top, f"+{b.qty}", ha="center", va="bottom", fontsize=8.4,
+                    fontweight=700, color=INK, zorder=3)
+    ax.axhline(p.trolleys_for_30, color=INK2, lw=1.0, ls=(0, (3, 3)), zorder=2)
+    ax.annotate(f"{p.trolleys_for_30} trolleys needed for {UPH_AT_TARGET} UPH", xy=(-0.42, p.trolleys_for_30),
+                xytext=(0, 3), textcoords="offset points", ha="left", va="bottom", fontsize=8.2,
+                color=INK2, zorder=6)
+
+    # ---------------- lines: capacity, demand, scrap (right axis) ----------------
+    mask = np.array([d is not None for d in s["demand"]])
+    xd = x[mask]
+    dem = np.array([d for d in s["demand"] if d is not None], dtype=float)
+    scrap = np.array([d for d in s["scrap_conv"] if d is not None], dtype=float)
+    # Capacity is proportional to operational trolleys, so the right axis is scaled to put the
+    # capacity line at a fixed share of each navy bar: it always runs inside the bars, clear of
+    # the bar labels, and the two scales stay in a meaningful relation.
+    cap_per_trolley = UPH_AT_TARGET * unit["cap_factor"] / p.trolleys_for_30
+    r_top = cap_per_trolley * l_top / CAP_SHARE_OF_BAR
+    if dem.size:
+        r_top = max(r_top, dem.max() * 1.15)
+    bottom_pad = 0.075 if p.label_all else 0.0  # room under zero for the lowest labels
+    ax.set_ylim(-bottom_pad * l_top, l_top)
+    ax2.set_ylim(-bottom_pad * r_top, r_top)
+    ax.set_yticks([t for t in MaxNLocator(5, integer=True).tick_values(0, l_top) if 0 <= t <= l_top])
+    if bottom_pad:
+        ax.spines["bottom"].set_visible(False)
+        ax.axhline(0, color=BASELINE, linewidth=0.9, zorder=2)
+    ax2.set_yticks([t for t in MaxNLocator(5).tick_values(0, r_top) if 0 <= t <= r_top])
+    ax2.yaxis.set_major_formatter(plt.FuncFormatter(lambda v, _: f"{v:,.0f}" if v >= 10 or v == 0 else f"{v:g}"))
+    ax2.set_ylabel(f"Capacity, demand & scrap ({u})", fontsize=9.5, color=INK2, rotation=270, labelpad=16)
+
+    has_short = bool(s["short_weeks"])
+    if has_short:
+        ax2.fill_between(xd, cap[mask], dem, where=dem > cap[mask], interpolate=True,
+                         color=CRITICAL, alpha=0.22, lw=0, zorder=1)
+    halo = [path_effects.Stroke(linewidth=4.8, foreground=SURFACE), path_effects.Normal()]
+
+    def series_line(xs, ys, color, marker, ms, z, **kw):
+        ax2.plot(xs, ys, color=color, linewidth=kw.pop("lw", 2.2), solid_capstyle="round",
+                 solid_joinstyle="round", path_effects=halo, zorder=z, **kw)
+        ax2.plot(xs, ys, linestyle="none", marker=marker, markersize=ms, markerfacecolor=color,
+                 markeredgecolor=SURFACE, markeredgewidth=1.3, zorder=z + 0.5)
+
+    series_line(x, cap, CAP_LINE, "o", 5.8, 4)
+    series_line(xd, dem, DEM_LINE, "s", 5.2, 5)
+    if p.scrap_on:
+        series_line(xd, scrap, VIOLET, "^", 5.6, 5, lw=1.8, linestyle=(0, (4, 2)), dash_capstyle="butt")
+
+    px = fig.dpi / 72.0
+    chip = dict(boxstyle="round,pad=0.18", fc=SURFACE, ec="none", alpha=0.92)
+
+    def y_px(xv, yv):
+        return ax2.transData.transform((xv, yv))[1]
+
+    # End labels: capacity sits above its last point (the right edge holds the axis);
+    # demand / scrap end at the last week with data and are labeled to the right, kept apart.
+    if not p.label_all:
+        ax2.annotate(f"Capacity {fmt(cap[-1], dec)}", (n - 1, cap[-1]), xytext=(4, 9),
+                     textcoords="offset points", ha="right", va="bottom", fontsize=9, fontweight=600,
+                     color=INK, zorder=8, bbox=chip)
+    ends = []
+    if xd.size:
+        ends.append((xd[-1], dem[-1], f"Demand {fmt(dem[-1], dec)}"))
+        if p.scrap_on:
+            ends.append((xd[-1], scrap[-1], f"Scrap {fmt(scrap[-1], sdec)}"))
+    floor = None
+    for xv, yv, text in sorted(ends, key=lambda e: e[1]):
+        natural = y_px(xv, yv)
+        target = natural if floor is None else max(natural, floor + 14 * px)
+        floor = target
+        ax2.annotate(text, (xv, yv), xytext=(9, (target - natural) / px), textcoords="offset points",
+                     ha="left", va="center", fontsize=9, fontweight=600, color=INK, zorder=8, bbox=chip)
+
+    if p.label_all:
+        series = [(list(cap), lambda v: fmt(v, dec), CAP_LINE_TEXT, set()),
+                  (s["demand"], lambda v: fmt(v, dec), DEM_LINE_TEXT, {ref_k})]
+        if p.scrap_on:
+            series.append((s["scrap_conv"], lambda v: fmt(v, sdec), VIOLET, {ref_k}))
+        room = (7.4 + 5) * px + 3
+        text_h = 7.4 * 1.3 * px
+
+        def bar_label_span(k):
+            y, anchor = bar_label_y[k]
+            y0 = ax.transData.transform((k, y))[1]
+            return (y0 - text_h, y0) if anchor == "top" else (y0, y0 + text_h)
+
+        def label_span(ypix, side):
+            off = 5 * px
+            return ((ypix + off, ypix + off + text_h) if side == "up" else
+                    (ypix - off - text_h, ypix - off) if side == "down" else
+                    (ypix - text_h / 2, ypix + text_h / 2))
+
+        def clashes(span, other):
+            return span[0] < other[1] + 1 and other[0] < span[1] + 1
+        placements = {"up": dict(xytext=(0, 5), ha="center", va="bottom"),
+                      "down": dict(xytext=(0, -5), ha="center", va="top"),
+                      "right": dict(xytext=(7, 0), ha="left", va="center")}
+        for k in range(n):
+            pts = sorted(((v, y_px(k, v), fmt_fn(v), color)
+                          for vals, fmt_fn, color, skip in series
+                          for v in [vals[k]] if v is not None and v > 0 and k not in skip),
+                         key=lambda t: -t[1])
+            for i, (v, ypix, text, color) in enumerate(pts):
+                if i == 0:
+                    side = "up"
+                elif i == len(pts) - 1:
+                    side = "down"
+                else:
+                    gap_up, gap_down = pts[i - 1][1] - ypix, ypix - pts[i + 1][1]
+                    side = ("right" if max(gap_up, gap_down) < room
+                            else "up" if gap_up >= gap_down else "down")
+                if side != "right" and clashes(label_span(ypix, side), bar_label_span(k)):
+                    side = "right"  # keep the bar's own number readable
+                ax2.annotate(text, (k, v), textcoords="offset points", fontsize=7.4, fontweight=600,
+                             color=color, zorder=7,
+                             bbox=dict(boxstyle="round,pad=0.14", fc=SURFACE, ec="none", alpha=0.9),
+                             **placements[side])
+
+    # ---------------- header: title + a legend row per axis ----------------
+    bar_handles = [
+        Patch(facecolor=NAVY, label="Operational trolleys"),
+        Patch(facecolor=PENDING_SOFT, label="Pending adjustment"),
+        Line2D([0], [0], color=INK2, lw=1.0, ls=(0, (3, 3)), label=f"Needed for {UPH_AT_TARGET} UPH"),
+    ]
+    line_handles = [
+        Line2D([0], [0], color=CAP_LINE, lw=2.2, marker="o", ms=5.5, mfc=CAP_LINE, mec=SURFACE,
+               label=f"Capacity ({u})"),
+        Line2D([0], [0], color=DEM_LINE, lw=2.2, marker="s", ms=5, mfc=DEM_LINE, mec=SURFACE,
+               label=f"Production demand ({u})"),
+    ]
+    if p.scrap_on:
+        line_handles.append(Line2D([0], [0], color=VIOLET, lw=1.8, ls=(0, (4, 2)), marker="^", ms=5.5,
+                                   mfc=VIOLET, mec=SURFACE, label=f"Scrap ({p.scrap_pct:g}%)"))
+    if has_short:
+        line_handles.append(Patch(facecolor=CRITICAL, alpha=0.22, label="Shortfall"))
+    ax.text(0, 1.035, "Trolley availability & capacity vs. production demand", transform=ax.transAxes,
+            fontsize=11.5, fontweight=600, color=INK, ha="left", va="bottom")
+    legend_kw = dict(frameon=False, fontsize=8.6, handlelength=1.8, handleheight=0.9, columnspacing=1.4,
+                     handletextpad=0.5, labelcolor=INK2, borderaxespad=0.2, loc="lower right")
+    ax.legend(handles=bar_handles, ncol=len(bar_handles), bbox_to_anchor=(1.0, 1.052), **legend_kw)
+    ax2.legend(handles=line_handles, ncol=len(line_handles), bbox_to_anchor=(1.0, 1.0), **legend_kw)
+
+    _draw_shipments(ax_c, s)
+    return _to_png(fig)
+
+
+def draw_main_chart(s: dict) -> bytes:
+    return _draw_split(s) if s["p"].chart_layout == "split" else _draw_combined(s)
 
 
 def draw_scrap_chart(s: dict) -> bytes:
@@ -697,6 +915,9 @@ st.sidebar.markdown("### Scenario controls")
 
 with st.sidebar.expander("Display", expanded=True):
     unit_mode = st.selectbox("Unit format", UNIT_OPTIONS)
+    chart_layout = st.radio("Chart layout", ["Combined", "Split"], horizontal=True,
+                            help="Combined: trolleys and capacity on one chart, as in the last review. "
+                                 "Split: separate panels.")
     label_all = st.checkbox("Label every data point", value=False,
                             help="Off: only the key call-outs are labeled (cleaner for presenting).")
 
@@ -745,7 +966,7 @@ params = Params(
     b1_qty=int(batch1_qty), b1_ship=batch1_start_week, b1_customs=int(batch1_customs),
     b2_qty=int(batch2_qty), b2_ship=batch2_start_week, b2_customs=int(batch2_customs),
     scrap_on=bool(enable_scrap), scrap_pct=float(scrap_pct), scrap_mode=scrap_mode,
-    scrap_range=tuple(scrap_range),
+    scrap_range=tuple(scrap_range), chart_layout=chart_layout.lower(),
 )
 s = build_scenario(params)
 CODE_VERSION = hashlib.md5(Path(__file__).read_bytes()).hexdigest()
