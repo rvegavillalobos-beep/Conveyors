@@ -71,10 +71,10 @@ UNIT_CFG = {
                     "demand_div": DAYS_PER_WEEK, "decimals": 0},
 }
 
-# Plan presented at the previous review (two weeks ago): baseline for "What changed".
-PREVIOUS_PLAN = {"b1_qty": 24, "b1_ship": "CW46", "rate": 2}
-# Checkpoints for operational trolleys in "What changed".
-CHECKPOINT_WEEKS = ("CW3", "CW6")
+# Plan shown at the previous review: baseline for "What changed".
+# Batch 1 shipped CW46 (on site CW52) and adjustment paused during the shutdown.
+PREVIOUS_PLAN = {"b1_qty": 30, "b1_ship": "CW46", "rate": 5, "adjust_in_shutdown": False, "shutdown_rate": 0}
+OP_TARGET = 50  # "50+ trolleys operational" milestone
 
 # Actions taken since the previous review: title, detail, (before, after) or None.
 ACTIONS = [
@@ -715,7 +715,7 @@ with st.sidebar.expander("Fleet & adjustment", expanded=True):
                                 value=5, step=1)
 
 with st.sidebar.expander("Shutdown · CW52 & CW1", expanded=True):
-    adjust_in_shutdown = st.toggle("Keep adjusting trolleys during shutdown", value=False,
+    adjust_in_shutdown = st.toggle("Keep adjusting trolleys during shutdown", value=True,
                                    help="Off: no trolleys are adjusted in CW52 and CW1.")
     if adjust_in_shutdown:
         shutdown_rate = st.slider("Adjustment rate during shutdown (trolleys / week)", min_value=1,
@@ -869,21 +869,37 @@ prev = build_scenario(replace(params, **PREVIOUS_PLAN))
 b1_now, b1_prev = s["batches"][0], prev["batches"][0]
 
 
-def op_at(scn: dict, week: str) -> int:
-    return int(scn["op"][scn["weeks"].index(week)])
+def label_of(idx) -> str:
+    return WEEK_LABELS[idx] if idx is not None else "beyond CW13"
 
 
-cp_mid, cp_end = CHECKPOINT_WEEKS
-b1_ready_note = (f"Batch 1 fully operational in {b1_now.ready_label} (was {b1_prev.ready_label})"
-                 if b1_now.ready_idx is not None else "")
+def first_week(scn: dict, test):
+    """Calendar index of the first visible week whose operational count passes test(count, start_count)."""
+    start_idx = WEEK_LABELS.index(scn["weeks"][0])
+    for k, v in enumerate(scn["op"]):
+        if test(int(v), int(scn["op"][0])):
+            return start_idx + k
+    return None
+
+
+def op_in(scn: dict, idx) -> int:
+    return int(scn["op"][idx - WEEK_LABELS.index(scn["weeks"][0])])
+
+
+ramp_prev, ramp_now = (first_week(x, lambda v, v0: v > v0) for x in (prev, s))
+target_prev, target_now = (first_week(x, lambda v, v0: v >= OP_TARGET) for x in (prev, s))
+ramp_note = (f"Batch 1 on site in {b1_now.arrival_label}"
+             + ("; adjustment continues through the shutdown" if params.adjust_in_shutdown else ""))
 tiles = [
-    impact_tile("Batch 1 on site", b1_prev.arrival_label, b1_now.arrival_label,
-                week_shift(b1_prev.arrival_idx, b1_now.arrival_idx),
-                f"Adjustment ramp-up starts in {b1_now.arrival_label}"),
-    impact_tile(f"Operational trolleys at {cp_mid}", f"{op_at(prev, cp_mid)}", f"{op_at(s, cp_mid)}",
-                count_shift(op_at(prev, cp_mid), op_at(s, cp_mid), "trolleys")),
-    impact_tile(f"Operational trolleys at {cp_end}", f"{op_at(prev, cp_end)}", f"{op_at(s, cp_end)}",
-                count_shift(op_at(prev, cp_end), op_at(s, cp_end), "trolleys"), b1_ready_note),
+    impact_tile("Adjustment ramp-up starts", label_of(ramp_prev), label_of(ramp_now),
+                week_shift(ramp_prev, ramp_now), ramp_note),
+    impact_tile(f"{OP_TARGET}+ trolleys operational", label_of(target_prev), label_of(target_now),
+                week_shift(target_prev, target_now),
+                f"{op_in(s, target_now)} operational trolleys in {label_of(target_now)}" if target_now else ""),
+    impact_tile("Batch 1 fully operational", b1_prev.ready_label, b1_now.ready_label,
+                week_shift(b1_prev.ready_idx, b1_now.ready_idx),
+                f"{op_in(s, b1_now.ready_idx)} operational trolleys in {b1_now.ready_label}"
+                if b1_now.ready_idx is not None and b1_now.ready_idx <= WEEK_LABELS.index(weeks[-1]) else ""),
     impact_tile("Trolley & secondary-function KPIs", "Not measured", "Measured", ("Enabled by the app", "good"),
                 "Trolley use on the line and at Scrap center, Rework and Q-HUB, now measured and controlled "
                 "with certainty"),
@@ -903,10 +919,10 @@ with expander(f"Actions since the last review · {len(ACTIONS)} completed", icon
         f'<div><div class="tcr-col-head">What we did</div>{actions_html}</div>'
         '<div><div class="tcr-col-head">What changed</div>'
         f'<div class="tcr-imp-grid">{"".join(tiles)}</div>'
-        '<div class="tcr-imp-note">Trolley figures: model comparison of the current scenario against the plan '
-        f'from the last review (Batch 1: {PREVIOUS_PLAN["b1_qty"]} trolleys shipping {PREVIOUS_PLAN["b1_ship"]}, '
-        f'adjustment {PREVIOUS_PLAN["rate"]}/week), all other settings equal. Supplier pre-adjustment is not part '
-        'of the model, so the effect shown is conservative.</div>'
+        f'<div class="tcr-imp-note">Before: previous plan, with Batch 1 shipping {PREVIOUS_PLAN["b1_ship"]} '
+        f'(on site {b1_prev.arrival_label}) and adjustment paused during the shutdown. After: current scenario. '
+        'Same model and settings otherwise. Supplier pre-adjustment is not part of the model, so the effect '
+        'shown is conservative.</div>'
         '</div></div>',
         unsafe_allow_html=True,
     )
