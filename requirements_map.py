@@ -81,6 +81,14 @@ SHADOW_OPACITY = 0.30
 SELECTION_NOTE = ("Trolleys sit where NOK parts can no longer move forward: "
                   "the downstream stations are not built to pass scrap")
 
+# Map views, from least to most detail. Every view keeps the same positions and styling;
+# each one only adds a layer on top of the previous one.
+VIEWS = {
+    "requested": "Requested only",   # requested stations + support areas
+    "stations": "All stations",      # + docking stations without a request
+    "layout": "Full layout",         # + real conveyor layout as background
+}
+
 # ----------------------------------------------------------------------------- style
 FONT = "Inter, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
 INK, INK2, MUTED, LINE = "#0b0b0b", "#52514e", "#898781", "#d9d8d1"
@@ -121,7 +129,10 @@ def _chip(x, y, size, color, ink, letter, radius=6):
             + _t(x + size / 2, y + size / 2 + size * 0.17, letter, size * 0.5, 700, ink, "middle"))
 
 
-def build_svg(show_layout: bool = True) -> str:
+def build_svg(view: str = "layout") -> str:
+    if view not in VIEWS:
+        raise ValueError(f"view must be one of {list(VIEWS)}, got {view!r}")
+    show_unused = view != "requested"
     tot = totals()
     counts = tot["by_cluster"]
     out = [f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {CANVAS_W} {CANVAS_H}" '
@@ -150,7 +161,7 @@ def build_svg(show_layout: bool = True) -> str:
     px, py, pw, ph = PLANT
     g.append(f'<rect x="{px}" y="{py}" width="{pw}" height="{ph}" rx="10" fill="#fbfbfa" stroke="#c3c2b7" '
              f'stroke-width="1.4"/>')
-    shadow = _shadow_href() if show_layout else None
+    shadow = _shadow_href() if view == "layout" else None
     if not shadow:
         g.append(f'<rect x="{px}" y="{py}" width="{pw}" height="{ph}" rx="10" fill="url(#tr-grid)"/>')
     for key, c in CLUSTERS.items():
@@ -177,7 +188,7 @@ def build_svg(show_layout: bool = True) -> str:
             g.append(_t(x + w / 2, y + h / 2 + 3.5, label, 9.5, 500, "#ffffff", "middle"))
 
     # docking stations without a request: quiet, hollow
-    for key, x, y, flag in UNUSED_POINTS:
+    for key, x, y, flag in (UNUSED_POINTS if show_unused else []):
         tip = f"Cluster {key} docking station" + (f" · flag {flag}" if flag else "") + " · no trolley requested"
         g.append(f'<g><title>{escape(tip)}</title>'
                  f'<circle cx="{x}" cy="{y}" r="7.5" fill="#ffffff" stroke="#9b9990" stroke-width="1.6"/>'
@@ -251,7 +262,9 @@ def build_svg(show_layout: bool = True) -> str:
     out.append(f'<rect x="{x0}" y="{split_y}" width="{cw - 2}" height="10" rx="5" fill="#184f95"/>')
     out.append(f'<rect x="{x0 + cw}" y="{split_y}" width="{w - cw}" height="10" rx="5" fill="#4a3aa7"/>')
     for col, (n, line1, line2, color) in enumerate((
-            (tot["clusters"], "at docking stations", f"of {tot['stations']} stations, 5 clusters", "#184f95"),
+            (tot["clusters"], "at docking stations",
+             f"of {tot['stations']} stations, 5 clusters" if show_unused else "in 5 production clusters",
+             "#184f95"),
             (tot["support"], "at support areas", "Scrap, Rework, Quality", "#4a3aa7"))):
         cx = x0 + col * (w / 2 + 20)
         out.append(f'<circle cx="{cx + 5}" cy="{split_y + 30}" r="5" fill="{color}"/>')
@@ -285,19 +298,31 @@ def build_svg(show_layout: bool = True) -> str:
     out.append(_t(x0 + w - 34, total_y + 24, tot["total"], 15, 700, INK, "end"))
     out.append(_t(x0 + w, total_y + 24, "100%", 11.5, 400, MUTED, "end"))
 
-    # legend under the map
+    # legend under the map (items only for the layers on screen; spacing stays the same)
     ly = MAP_DY + PLANT[1] + PLANT[3] + 30
-    lx = MAP_DX + PLANT[0]
-    out.append(f'<circle cx="{lx + 10}" cy="{ly}" r="13" fill="#2a78d6" fill-opacity="0.22"/>'
-               f'<circle cx="{lx + 10}" cy="{ly}" r="8" fill="#2a78d6" stroke="#ffffff" stroke-width="2"/>')
-    out.append(_t(lx + 30, ly + 4.5, "Trolley requested (1 per station)", 12, 400, INK2))
-    out.append(f'<circle cx="{lx + 252}" cy="{ly}" r="7" fill="#ffffff" stroke="#9b9990" stroke-width="1.6"/>')
-    out.append(_t(lx + 268, ly + 4.5, "Docking station, not requested", 12, 400, INK2))
-    out.append(f'<rect x="{lx + 476}" y="{ly - 9}" width="26" height="18" rx="5" fill="#f0efea" '
-               f'stroke="#52514e" stroke-width="1"/>')
-    out.append(_t(lx + 510, ly + 4.5, "Support area (approx. location)", 12, 400, INK2))
-    out.append(f'<rect x="{lx + 712}" y="{ly - 9}" width="26" height="18" rx="3" fill="#4a4945"/>')
-    out.append(_t(lx + 746, ly + 4.5, "Access / WPC", 12, 400, INK2))
+    x = MAP_DX + PLANT[0]
+    items = [("requested", "Trolley requested (1 per station)", 252),
+             ("unused", "Docking station, not requested", 224),
+             ("support", "Support area (approx. location)", 236),
+             ("gate", "Access / WPC", 0)]
+    for kind, label, width in items:
+        if kind == "unused" and not show_unused:
+            continue
+        if kind == "requested":
+            out.append(f'<circle cx="{x + 10}" cy="{ly}" r="13" fill="#2a78d6" fill-opacity="0.22"/>'
+                       f'<circle cx="{x + 10}" cy="{ly}" r="8" fill="#2a78d6" stroke="#ffffff" stroke-width="2"/>')
+            out.append(_t(x + 30, ly + 4.5, label, 12, 400, INK2))
+        elif kind == "unused":
+            out.append(f'<circle cx="{x}" cy="{ly}" r="7" fill="#ffffff" stroke="#9b9990" stroke-width="1.6"/>')
+            out.append(_t(x + 16, ly + 4.5, label, 12, 400, INK2))
+        elif kind == "support":
+            out.append(f'<rect x="{x}" y="{ly - 9}" width="26" height="18" rx="5" fill="#f0efea" '
+                       f'stroke="#52514e" stroke-width="1"/>')
+            out.append(_t(x + 34, ly + 4.5, label, 12, 400, INK2))
+        else:
+            out.append(f'<rect x="{x}" y="{ly - 9}" width="26" height="18" rx="3" fill="#4a4945"/>')
+            out.append(_t(x + 34, ly + 4.5, label, 12, 400, INK2))
+        x += width
     out.append('</svg>')
     return "".join(out)
 
@@ -305,6 +330,7 @@ def build_svg(show_layout: bool = True) -> str:
 if __name__ == "__main__":  # quick local preview
     import sys
     path = sys.argv[1] if len(sys.argv) > 1 else "requirements_map.svg"
+    view = sys.argv[2] if len(sys.argv) > 2 else "layout"
     with open(path, "w", encoding="utf-8") as fh:
-        fh.write(build_svg())
+        fh.write(build_svg(view))
     print(totals())

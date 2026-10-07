@@ -6,6 +6,7 @@ mechanical adjustment of new trolleys, the year-end shutdown and scrap build-up.
 """
 from __future__ import annotations
 
+import hashlib
 import io
 from dataclasses import astuple, dataclass
 from pathlib import Path
@@ -620,8 +621,12 @@ def draw_scrap_chart(s: dict) -> bytes:
 
 
 @st.cache_data(show_spinner=False, max_entries=64)
-def render_charts(param_values: tuple) -> tuple:
-    """Charts are cached on plain values so toggling back and forth is instant."""
+def render_charts(param_values: tuple, code_version: str) -> tuple:
+    """Charts are cached on plain values so toggling back and forth is instant.
+
+    code_version is part of the cache key only: a redeploy with new drawing code
+    must never serve charts cached by the previous version.
+    """
     s = build_scenario(Params(*param_values))
     main_png = draw_main_chart(s)
     scrap_png = draw_scrap_chart(s) if s["p"].scrap_on else None
@@ -672,8 +677,6 @@ with st.sidebar.expander("Display", expanded=True):
     unit_mode = st.selectbox("Unit format", UNIT_OPTIONS)
     label_all = st.checkbox("Label every data point", value=False,
                             help="Off: only the key call-outs are labeled (cleaner for presenting).")
-    show_layout = st.toggle("Show conveyor layout behind the map", value=True,
-                            help="Faint background of the real plant layout in the requirements map.")
 
 with st.sidebar.expander("Fleet & adjustment", expanded=True):
     base_fleet = st.number_input("Base fleet (trolleys today)", min_value=20, max_value=60, value=35, step=5)
@@ -723,7 +726,8 @@ params = Params(
     scrap_range=tuple(scrap_range),
 )
 s = build_scenario(params)
-main_png, scrap_png = render_charts(astuple(params))
+CODE_VERSION = hashlib.md5(Path(__file__).read_bytes()).hexdigest()
+main_png, scrap_png = render_charts(astuple(params), CODE_VERSION)
 
 unit = s["unit"]
 dec, u = unit["decimals"], unit["short"]
@@ -738,15 +742,32 @@ def kpi(label: str, value: str, unit_txt: str = "", sub: str = "") -> str:
 
 
 # ---------------------------------------------------------------- Trolley requirements (top)
-@st.cache_data(show_spinner=False)
-def requirements_svg(show_layout: bool) -> str:
-    return requirements_map.build_svg(show_layout=show_layout)
+def map_view_selector() -> str:
+    """Compact three-way switch for the requirements map (simple -> all stations -> full layout)."""
+    options = list(requirements_map.VIEWS)
+    label_of = requirements_map.VIEWS.get
+    if hasattr(st, "segmented_control"):
+        choice = st.segmented_control("Map view", options, default=options[0], format_func=label_of,
+                                      key="map_view", label_visibility="collapsed")
+    else:  # older Streamlit
+        choice = st.radio("Map view", options, format_func=label_of, horizontal=True, key="map_view",
+                          label_visibility="collapsed")
+    # Clicking the active segment deselects it; keep showing the last view instead of failing.
+    if choice not in requirements_map.VIEWS:
+        choice = st.session_state.get("map_view_last", options[0])
+    st.session_state["map_view_last"] = choice
+    return choice
 
 
-req_svg = requirements_svg(bool(show_layout))
-st.markdown(f'<div class="tcr-req">{req_svg}</div>', unsafe_allow_html=True)
-st.download_button("Download requirements map (SVG)", data=req_svg.encode("utf-8"),
-                   file_name="trolley_requirements_by_station.svg", mime="image/svg+xml")
+map_slot = st.empty()  # the map renders above its own controls
+c_view, c_dl, _ = st.columns([2.3, 1.5, 3.2])
+with c_view:
+    map_view = map_view_selector()
+req_svg = requirements_map.build_svg(view=map_view)
+map_slot.markdown(f'<div class="tcr-req">{req_svg}</div>', unsafe_allow_html=True)
+with c_dl:
+    st.download_button("Download map (SVG)", data=req_svg.encode("utf-8"),
+                       file_name=f"trolley_requirements_{map_view}.svg", mime="image/svg+xml")
 st.markdown('<div style="height:14px"></div>', unsafe_allow_html=True)
 
 # ---------------------------------------------------------------- Main chart
