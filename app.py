@@ -23,7 +23,7 @@ from matplotlib import patheffects as path_effects  # noqa: E402
 from matplotlib.lines import Line2D  # noqa: E402
 from matplotlib.patches import Patch  # noqa: E402
 from matplotlib.ticker import MaxNLocator  # noqa: E402
-from matplotlib.transforms import blended_transform_factory  # noqa: E402
+from matplotlib.transforms import blended_transform_factory, offset_copy  # noqa: E402
 
 import importlib  # noqa: E402
 
@@ -107,7 +107,7 @@ PENDING_SOFT = "#b7d3f6"
 CAP_SHARE_OF_BAR = 0.45 # combined chart: capacity line height as a share of the navy bar
 
 FIG_W = 14.0
-LEFT, RIGHT = 0.078, 0.905
+LEFT, RIGHT = 0.1, 0.905
 
 _fonts = sorted((APP_DIR / "assets" / "fonts").glob("*.otf"))
 for _font in _fonts:
@@ -145,6 +145,7 @@ class Params:
     scrap_mode: str
     scrap_range: tuple
     chart_layout: str = "combined"
+    y_max: int = 0  # left (trolley) axis maximum; 0 = automatic
 
 
 @dataclass
@@ -346,7 +347,7 @@ def _to_png(fig, dpi: int = 200) -> bytes:
     return buf.getvalue()
 
 
-def _draw_shipments(ax_c, s: dict) -> None:
+def _draw_shipments(ax_c, s: dict, compact: bool = False) -> None:
     """Gantt of both batches: transit, customs, adjustment and the week each is fully operational."""
     weeks, n = s["weeks"], len(s["weeks"])
     start_idx = WEEK_LABELS.index(weeks[0])
@@ -396,7 +397,14 @@ def _draw_shipments(ax_c, s: dict) -> None:
         Patch(facecolor=PENDING, label="Adjustment"),
         Line2D([0], [0], color="none", marker="D", ms=6.5, mfc=NAVY, mec=SURFACE, label="Fully operational"),
     ]
-    _panel_header(ax_c, "Shipments & adjustment", handles_c)
+    if compact:
+        ax_c.set_ylabel("Shipments &\nadjustment", fontsize=9.5, color=INK2, labelpad=10, linespacing=1.3)
+        ax_c.legend(handles=handles_c, ncol=len(handles_c), loc="upper right", bbox_to_anchor=(1.0, 0.0),
+                    bbox_transform=offset_copy(ax_c.transAxes, fig=ax_c.figure, y=-21, units="points"),
+                    frameon=False, fontsize=8.6, handlelength=1.6, handleheight=0.9, columnspacing=1.4,
+                    handletextpad=0.5, labelcolor=INK2, borderaxespad=0)
+    else:
+        _panel_header(ax_c, "Shipments & adjustment", handles_c)
     _week_axis(ax_c, weeks, s["years"])
 
     for b in s["batches"]:
@@ -553,7 +561,7 @@ def _draw_split(s: dict) -> bytes:
     bar_kw = dict(width=0.62, edgecolor=SURFACE, linewidth=1.3, zorder=3)
     ax_b.bar(x, op, color=NAVY, **bar_kw)
     ax_b.bar(x, pending, bottom=op, color=PENDING, **bar_kw)
-    b_top = max(phys.max(), p.trolleys_for_30) * 1.22
+    b_top = p.y_max or max(phys.max(), p.trolleys_for_30) * 1.22
     ax_b.set_ylim(0, b_top)
     ax_b.yaxis.set_major_locator(MaxNLocator(4, integer=True))
     for k, v in enumerate(op):
@@ -589,6 +597,11 @@ def _draw_split(s: dict) -> bytes:
     return _to_png(fig)
 
 
+def auto_y_max(phys, target: int) -> int:
+    """Automatic trolley-axis maximum: 20% headroom over the tallest bar or the target, rounded up to 10."""
+    return int(np.ceil(max(float(phys.max()), target) * 1.2 / 10.0) * 10)
+
+
 def _draw_combined(s: dict) -> bytes:
     """Fleet bars and capacity / demand / scrap lines on one panel (as in the previous review),
     with the shipments Gantt underneath."""
@@ -600,15 +613,14 @@ def _draw_combined(s: dict) -> bytes:
     cap, op, phys = s["cap"], s["op"], s["phys"]
     pending = phys - op
 
-    fig = plt.figure(figsize=(FIG_W, 8.1), facecolor=SURFACE)
-    gs = fig.add_gridspec(2, 1, height_ratios=[3.5, 0.95], hspace=0.42,
-                          left=LEFT, right=RIGHT, top=0.905, bottom=0.085)
+    fig = plt.figure(figsize=(FIG_W, 8.4), facecolor=SURFACE)
+    gs = fig.add_gridspec(2, 1, height_ratios=[4.1, 0.95], hspace=0.06,
+                          left=LEFT, right=RIGHT, top=0.915, bottom=0.08)
     ax = fig.add_subplot(gs[0])
     ax_c = fig.add_subplot(gs[1], sharex=ax)
     for a in (ax, ax_c):
         _style_axis(a)
-    ax.tick_params(labelbottom=True)
-    ax.tick_params(axis="x", labelcolor=INK2, labelsize=8.3)
+    ax.tick_params(labelbottom=False)  # weeks are read on the shipments axis right below
     ax2 = ax.twinx()
     for side in ("top", "right", "left", "bottom"):
         ax2.spines[side].set_visible(False)
@@ -627,7 +639,7 @@ def _draw_combined(s: dict) -> bytes:
     bar_kw = dict(width=0.62, edgecolor=SURFACE, linewidth=1.3, zorder=2)
     ax.bar(x, op, color=NAVY, **bar_kw)
     ax.bar(x, pending, bottom=op, color=PENDING_SOFT, **bar_kw)
-    l_top = max(phys.max(), p.trolleys_for_30) * 1.16
+    l_top = p.y_max or auto_y_max(phys, p.trolleys_for_30)
     ax.set_ylabel("Available trolleys", fontsize=9.5, color=INK2, labelpad=8)
     bar_label_y = {}  # week -> (y anchor in trolleys, "top"/"bottom") of the bar's value label
     for k, v in enumerate(op):
@@ -783,7 +795,8 @@ def _draw_combined(s: dict) -> bytes:
     ax.legend(handles=bar_handles, ncol=len(bar_handles), bbox_to_anchor=(1.0, 1.052), **legend_kw)
     ax2.legend(handles=line_handles, ncol=len(line_handles), bbox_to_anchor=(1.0, 1.0), **legend_kw)
 
-    _draw_shipments(ax_c, s)
+    _draw_shipments(ax_c, s, compact=True)
+    fig.align_ylabels([ax, ax_c])
     return _to_png(fig)
 
 
@@ -915,6 +928,9 @@ st.sidebar.markdown("### Scenario controls")
 
 with st.sidebar.expander("Display", expanded=True):
     unit_mode = st.selectbox("Unit format", UNIT_OPTIONS)
+    y_axis_choice = st.select_slider("Trolley axis maximum", options=["Auto"] + list(range(80, 260, 10)),
+                                     value="Auto", help="Top of the left axis (trolleys). Auto leaves 20% "
+                                                        "headroom over the tallest bar or the 30 UPH target.")
     chart_layout = st.radio("Chart layout", ["Combined", "Split"], horizontal=True,
                             help="Combined: trolleys and capacity on one chart, as in the last review. "
                                  "Split: separate panels.")
@@ -967,6 +983,7 @@ params = Params(
     b2_qty=int(batch2_qty), b2_ship=batch2_start_week, b2_customs=int(batch2_customs),
     scrap_on=bool(enable_scrap), scrap_pct=float(scrap_pct), scrap_mode=scrap_mode,
     scrap_range=tuple(scrap_range), chart_layout=chart_layout.lower(),
+    y_max=0 if y_axis_choice == "Auto" else int(y_axis_choice),
 )
 s = build_scenario(params)
 CODE_VERSION = hashlib.md5(Path(__file__).read_bytes()).hexdigest()
