@@ -43,7 +43,7 @@ DAYS_PER_WEEK = 5.0
 UPH_AT_TARGET = 30                # "Trolleys required for 30 UPH"
 SHUTDOWN_WEEKS = ("CW52", "CW1")  # year-end shutdown (no production)
 HORIZON_END = "CW13"              # chart always runs at least to this week
-PRODUCTION_START = "CW46"         # chart always starts at least here
+PRODUCTION_START = "CW45"         # chart always starts at least here (first production week)
 
 # Planning calendar: CW42 2026 onwards. Kept long so readiness of late batches
 # can still be computed even when it falls beyond the visible horizon.
@@ -52,7 +52,7 @@ WEEK_LABELS = [w for w, _ in CALENDAR]
 
 # Weekly production demand (units / week). Shutdown weeks are 0.
 DEMAND_UNITS_PER_WEEK = {
-    "CW46": 49, "CW47": 69, "CW48": 123, "CW49": 147, "CW50": 184, "CW51": 196,
+    "CW45": 65, "CW46": 49, "CW47": 69, "CW48": 123, "CW49": 147, "CW50": 184, "CW51": 196,
     "CW52": 0, "CW1": 0, "CW2": 176, "CW3": 199, "CW4": 223, "CW5": 246,
     "CW6": 206, "CW7": 270, "CW8": 281,
 }
