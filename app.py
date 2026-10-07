@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import io
-from dataclasses import astuple, dataclass
+from dataclasses import astuple, dataclass, replace
 from pathlib import Path
 
 import matplotlib
@@ -70,6 +70,20 @@ UNIT_CFG = {
     "Units / Day": {"short": "units/day", "cap_factor": HOURS_PER_WEEK / DAYS_PER_WEEK,
                     "demand_div": DAYS_PER_WEEK, "decimals": 0},
 }
+
+# Plan presented at the previous review (two weeks ago): baseline for "What changed".
+PREVIOUS_PLAN = {"b1_qty": 24, "b1_ship": "CW46", "rate": 2}
+
+# Actions taken since the previous review: title, detail, (before, after) or None.
+ACTIONS = [
+    ("Batch 1 shipment pulled ahead", "Ships one week earlier", ("CW46", "CW45")),
+    ("Batch 1 quantity increased", "More trolleys in the first shipment", ("24", "30 trolleys")),
+    ("Supplier pre-adjusts trolleys", "Aligned with the supplier so trolleys arrive pre-adjusted, "
+                                      "reducing the adjustment workload on site", None),
+    ("Adjustment rate increased", "More trolleys adjusted on site every week", ("2", "5 / week")),
+    ("Trolley usage controls via app", "Control measures for trolley use created and implemented "
+                                       "through the app", None),
+]
 
 SCRAP_MODES = [
     "Until the first batch arrives",
@@ -655,17 +669,29 @@ CSS = """
 .tcr-hero{font-size:52px;font-weight:700;letter-spacing:-.03em;line-height:1}
 .tcr-section{font-size:21px;font-weight:650;letter-spacing:-.015em;margin:34px 0 4px}
 .tcr-section-sub{font-size:14px;color:#52514e;margin-bottom:14px;line-height:1.5}
-.tcr-note{font-size:12.5px;color:#898781;line-height:1.55;margin-top:6px}
-.tcr-table-wrap{overflow-x:auto;border:1px solid rgba(11,11,11,.08);border-radius:12px;background:#fff}
-table.tcr-table{border-collapse:collapse;font-size:12.5px;font-variant-numeric:tabular-nums;width:100%}
-.tcr-table th,.tcr-table td{padding:7px 10px;text-align:right;white-space:nowrap;border-bottom:1px solid #efeee9;color:#0b0b0b}
-.tcr-table th:first-child,.tcr-table td:first-child{text-align:left;position:sticky;left:0;background:#fff;font-weight:500;z-index:1}
-.tcr-table thead th{color:#898781;font-weight:600;font-size:11.5px;background:#fafaf8}
-.tcr-table thead th:first-child{background:#fafaf8}
-.tcr-table .sd{background:#f4f3ef}
-.tcr-table .short{color:#a12a2a;background:#fbeaea;font-weight:600}
-.tcr-table .win{background:#eeecf8;font-weight:600}
-.tcr-table tr:last-child td{border-bottom:none}
+.tcr-actions{display:grid;grid-template-columns:repeat(auto-fit,minmax(420px,1fr));gap:28px;padding:6px 2px 4px}
+.tcr-col-head{font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:#898781;margin-bottom:6px}
+.tcr-act{display:flex;align-items:flex-start;gap:12px;padding:12px 0;border-bottom:1px solid #efeee9}
+.tcr-act:last-child{border-bottom:none}
+.tcr-act-ic{flex:none;width:24px;height:24px;border-radius:50%;background:#e8f4e8;color:#006300;display:inline-flex;align-items:center;justify-content:center;margin-top:1px}
+.tcr-act-body{flex:1;min-width:0}
+.tcr-act-title{font-size:14.5px;font-weight:600;color:#0b0b0b;line-height:1.35}
+.tcr-act-sub{font-size:13px;color:#52514e;line-height:1.45;margin-top:2px}
+.tcr-act-chg{flex:none;display:inline-flex;align-items:center;gap:7px;font-size:13px;padding:5px 11px;border-radius:999px;background:#f4f3ef;white-space:nowrap;margin-top:1px}
+.tcr-act-chg .old,.tcr-imp-vals .old{color:#898781;text-decoration:line-through;text-decoration-color:rgba(137,135,129,.6)}
+.tcr-act-chg .arr,.tcr-imp-vals .arr{color:#a9a79f}
+.tcr-act-chg .new{color:#0b0b0b;font-weight:650}
+.tcr-imp-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:10px}
+.tcr-imp{background:#fff;border:1px solid rgba(11,11,11,.08);border-radius:14px;padding:14px 16px}
+.tcr-imp-label{font-size:12.5px;font-weight:500;color:#52514e}
+.tcr-imp-vals{display:flex;align-items:baseline;gap:9px;margin:8px 0 9px}
+.tcr-imp-vals .old{font-size:15px}
+.tcr-imp-vals .new{font-size:26px;font-weight:650;letter-spacing:-.02em;color:#0b0b0b}
+.tcr-delta{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;padding:3px 9px;border-radius:999px}
+.tcr-delta.good{color:#006300;background:#e8f4e8}
+.tcr-delta.bad{color:#a12a2a;background:#fbeaea}
+.tcr-delta.flat{color:#52514e;background:#f0efea}
+.tcr-imp-note{font-size:12px;color:#898781;line-height:1.5;margin-top:12px}
 </style>
 """
 st.markdown(CSS, unsafe_allow_html=True)
@@ -683,7 +709,7 @@ with st.sidebar.expander("Fleet & adjustment", expanded=True):
     target_trolleys_for_30_uph = st.slider("Trolleys required for 30 UPH", min_value=60, max_value=200,
                                            value=90, step=5)
     adjustment_rate = st.slider("Mechanical adjustment rate (trolleys / week)", min_value=1, max_value=10,
-                                value=2, step=1)
+                                value=5, step=1)
 
 with st.sidebar.expander("Shutdown · CW52 & CW1", expanded=True):
     adjust_in_shutdown = st.toggle("Keep adjusting trolleys during shutdown", value=False,
@@ -697,9 +723,9 @@ with st.sidebar.expander("Shutdown · CW52 & CW1", expanded=True):
 with st.sidebar.expander("Shipments & customs", expanded=True):
     st.caption(f"Sea transit is fixed at {TRANSIT_WEEKS} weeks; customs adds 1–2 weeks.")
     st.markdown("**Batch 1**")
-    batch1_qty = st.number_input("Batch 1 quantity", min_value=10, max_value=50, value=24, step=2)
+    batch1_qty = st.number_input("Batch 1 quantity", min_value=10, max_value=50, value=30, step=2)
     batch1_start_week = st.selectbox("Batch 1 shipment week", SHIP_WEEK_OPTIONS,
-                                     index=SHIP_WEEK_OPTIONS.index("CW46"), key="b1_start")
+                                     index=SHIP_WEEK_OPTIONS.index("CW45"), key="b1_start")
     batch1_customs = st.slider("Batch 1 customs (weeks)", min_value=1, max_value=2, value=2, key="b1_customs")
     st.markdown("**Batch 2**")
     batch2_qty = st.number_input("Batch 2 quantity", min_value=10, max_value=60, value=30, step=2)
@@ -795,42 +821,93 @@ with c2:
     st.download_button("Download data (CSV)", data=table.to_csv(index=False).encode("utf-8"),
                        file_name="trolley_capacity_weekly.csv", mime="text/csv")
 
-st.markdown(
-    '<div class="tcr tcr-note">Assumptions: capacity scales linearly with operational trolleys '
-    f'({params.trolleys_for_30} trolleys = {UPH_AT_TARGET} UPH); {HOURS_PER_WEEK:.0f} production hours and '
-    f'{DAYS_PER_WEEK:.0f} days per week; new trolleys are adjusted first-in-first-out starting the week they '
-    f'arrive; shipment = {TRANSIT_WEEKS} weeks transit + customs.</div>',
-    unsafe_allow_html=True,
-)
+# ---------------------------------------------------------------- Actions since last review
+def expander(label: str, icon: str | None = None, expanded: bool = False):
+    try:
+        return st.expander(label, expanded=expanded, icon=icon)
+    except TypeError:  # older Streamlit without expander icons
+        return st.expander(label, expanded=expanded)
 
-# ---------------------------------------------------------------- Weekly detail
-with st.expander("Weekly detail", expanded=False):
-    sd_cols = {k for k, w in enumerate(weeks) if w in SHUTDOWN_WEEKS}
-    win_cols = set(s["window_k"]) if params.scrap_on else set()
 
-    def cell(k: int, text: str, extra: str = "") -> str:
-        cls = " ".join(c for c in (("sd" if k in sd_cols else ""), extra) if c)
-        return f'<td class="{cls}">{text}</td>' if cls else f"<td>{text}</td>"
+def week_shift(before_idx, after_idx) -> tuple[str, str]:
+    """Delta text and tone for a milestone week (earlier is better)."""
+    if before_idx is None or after_idx is None:
+        return ("Within horizon" if after_idx is not None else "Beyond horizon",
+                "good" if after_idx is not None else "bad")
+    d = before_idx - after_idx
+    if d == 0:
+        return "No change", "flat"
+    n = abs(d)
+    return f"{n} week{'s' if n != 1 else ''} {'earlier' if d > 0 else 'later'}", "good" if d > 0 else "bad"
 
-    head = "<th></th>" + "".join(
-        f'<th class="sd">{w}</th>' if k in sd_cols else f"<th>{w}</th>" for k, w in enumerate(weeks))
-    rows_html = [
-        ("Trolleys on site", [cell(k, f"{v}") for k, v in enumerate(s["phys"])]),
-        ("Operational", [cell(k, f"{v}") for k, v in enumerate(s["op"])]),
-        ("Pending adjustment", [cell(k, f"{v}" if v else "–") for k, v in enumerate(s["phys"] - s["op"])]),
-        (f"Capacity ({u})", [cell(k, fmt(v, dec)) for k, v in enumerate(s["cap"])]),
-        (f"Demand ({u})", [cell(k, "–" if d is None else fmt(d, dec)) for k, d in enumerate(s["demand"])]),
-        (f"Headroom ({u})", [
-            cell(k, fmt_signed(s["headroom"][k], dec), "short" if s["headroom"][k] < 0 else "")
-            if k in s["headroom"] else cell(k, "–") for k in range(len(weeks))]),
-    ]
-    if params.scrap_on:
-        rows_html.append(("Scrap (modules)", [
-            cell(k, "–" if v is None else f"{v:.1f}", "win" if k in win_cols else "")
-            for k, v in enumerate(s["scrap_modules"])]))
-    body = "".join(f"<tr><td>{name}</td>{''.join(cells)}</tr>" for name, cells in rows_html)
-    st.markdown(f'<div class="tcr tcr-table-wrap"><table class="tcr-table"><thead><tr>{head}</tr></thead>'
-                f"<tbody>{body}</tbody></table></div>", unsafe_allow_html=True)
+
+def count_shift(before: float, after: float, unit_txt: str, decimals: int = 0) -> tuple[str, str]:
+    d = after - before
+    if round(d, decimals) == 0:
+        return "No change", "flat"
+    return f"{fmt_signed(d, decimals)} {unit_txt}", "good" if d > 0 else "bad"
+
+
+def impact_tile(label: str, before: str, after: str, delta: tuple[str, str]) -> str:
+    text, tone = delta
+    icon = {"good": "▲", "bad": "▼", "flat": "–"}[tone]
+    return (f'<div class="tcr-imp"><div class="tcr-imp-label">{label}</div>'
+            f'<div class="tcr-imp-vals"><span class="old">{before}</span><span class="arr">→</span>'
+            f'<span class="new">{after}</span></div>'
+            f'<span class="tcr-delta {tone}">{icon} {text}</span></div>')
+
+
+CHECK_SVG = ('<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M3.5 8.4l2.9 2.9 '
+             '6.1-6.6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" '
+             'stroke-linejoin="round"/></svg>')
+
+prev = build_scenario(replace(params, **PREVIOUS_PLAN))
+b1_now, b1_prev = s["batches"][0], prev["batches"][0]
+
+
+def fleet_ready(scn: dict):
+    idx = [b.ready_idx for b in scn["batches"]]
+    return None if None in idx else max(idx)
+
+
+def label_of(idx) -> str:
+    return WEEK_LABELS[idx] if idx is not None else "after CW52"
+
+
+ref_now, ref_prev = s["ref_k"], prev["ref_k"]
+ref_week = weeks[ref_now]
+tiles = [
+    impact_tile("Batch 1 fully operational", b1_prev.ready_label, b1_now.ready_label,
+                week_shift(b1_prev.ready_idx, b1_now.ready_idx)),
+    impact_tile("Whole fleet operational", label_of(fleet_ready(prev)), label_of(fleet_ready(s)),
+                week_shift(fleet_ready(prev), fleet_ready(s))),
+    impact_tile(f"Operational trolleys at {ref_week}", f"{prev['op'][ref_prev]}", f"{s['op'][ref_now]}",
+                count_shift(prev["op"][ref_prev], s["op"][ref_now], "trolleys")),
+    impact_tile(f"Capacity at {ref_week}", fmt(prev["cap"][ref_prev], dec), f"{fmt(s['cap'][ref_now], dec)} {u}",
+                count_shift(prev["cap"][ref_prev], s["cap"][ref_now], u, dec)),
+]
+actions_html = "".join(
+    f'<div class="tcr-act"><span class="tcr-act-ic">{CHECK_SVG}</span>'
+    f'<div class="tcr-act-body"><div class="tcr-act-title">{title}</div><div class="tcr-act-sub">{detail}</div></div>'
+    + (f'<div class="tcr-act-chg"><span class="old">{chg[0]}</span><span class="arr">→</span>'
+       f'<span class="new">{chg[1]}</span></div>' if chg else "")
+    + '</div>'
+    for title, detail, chg in ACTIONS)
+
+st.markdown('<div style="height:10px"></div>', unsafe_allow_html=True)
+with expander(f"Actions since the last review · {len(ACTIONS)} completed", icon=":material/fact_check:"):
+    st.markdown(
+        '<div class="tcr tcr-actions">'
+        f'<div><div class="tcr-col-head">What we did</div>{actions_html}</div>'
+        '<div><div class="tcr-col-head">What changed</div>'
+        f'<div class="tcr-imp-grid">{"".join(tiles)}</div>'
+        '<div class="tcr-imp-note">Model comparison of the current scenario against the plan from the last '
+        f'review (Batch 1: {PREVIOUS_PLAN["b1_qty"]} trolleys shipping {PREVIOUS_PLAN["b1_ship"]}, adjustment '
+        f'{PREVIOUS_PLAN["rate"]}/week), all other settings equal. Supplier pre-adjustment and app usage controls '
+        'are not part of the model, so the effect shown is conservative.</div>'
+        '</div></div>',
+        unsafe_allow_html=True,
+    )
 
 # ---------------------------------------------------------------- Scrap accumulation
 if params.scrap_on:
