@@ -591,6 +591,25 @@ def auto_y_max(phys) -> float:
     return float(phys.max()) * 1.075
 
 
+def _place_corner_block(fig, ax, ax2, leg, ttl, phys, arrival_ks) -> None:
+    """Drop the legend + title block until it rests just above the bars it covers."""
+    fig.canvas.draw()
+    renderer = fig.canvas.get_renderer()
+    px = fig.dpi / 72.0
+    lb, tb = leg.get_window_extent(renderer), ttl.get_window_extent(renderer)
+    right_x = ax.transData.inverted().transform((max(lb.x1, tb.x1), 0))[0]
+    covered = [k for k in range(len(phys)) if k - 0.31 < right_x]  # bars are 0.62 wide
+    bar_top_px = max(ax.transData.transform((k, phys[k]))[1] + (16 * px if k in arrival_ks else 0)
+                     for k in covered)
+    gap, title_gap = 10 * px, 8 * px
+    block_h = lb.height + title_gap + tb.height
+    ceiling = ax2.transAxes.transform((0, 0.99))[1]
+    bottom = min(bar_top_px + gap, ceiling - block_h)
+    to_axes = ax2.transAxes.inverted()
+    leg.set_bbox_to_anchor((0.0, to_axes.transform((0, bottom))[1]), transform=ax2.transAxes)
+    ttl.set_position((0.008, to_axes.transform((0, bottom + lb.height + title_gap))[1]))
+
+
 def _draw_combined(s: dict) -> bytes:
     """Fleet bars and capacity / demand / scrap lines on one panel (as in the previous review),
     with the shipments Gantt underneath."""
@@ -778,13 +797,14 @@ def _draw_combined(s: dict) -> bytes:
                                    mfc=VIOLET, mec=SURFACE, label=f"Scrap ({p.scrap_pct:g}%)"))
     if has_short:
         line_handles.append(Patch(facecolor=CRITICAL, alpha=0.22, label="Shortfall"))
-    # Title and legend live in the empty top-left corner of the plot (above the early, short bars),
-    # so the chart has no empty band on top: its ceiling is the tallest bar.
-    ax2.text(0.008, 0.99, "Trolley availability & capacity vs. production demand", transform=ax.transAxes,
-             fontsize=11.5, fontweight=600, color=INK, ha="left", va="top", zorder=9)
-    ax2.legend(handles=bar_handles + line_handles, ncol=1, loc="upper left", bbox_to_anchor=(0.0, 0.94),
-               frameon=False, fontsize=8.8, handlelength=1.9, handleheight=0.9, labelspacing=0.55,
-               handletextpad=0.6, labelcolor=INK2, borderaxespad=0.6)
+    # Title and legend sit inside the plot, right on top of the early (short) bars, so the chart
+    # has no empty band: its ceiling is the tallest bar.
+    leg = ax2.legend(handles=bar_handles + line_handles, ncol=1, loc="lower left", bbox_to_anchor=(0.0, 0.5),
+                     frameon=False, fontsize=8.8, handlelength=1.9, handleheight=0.9, labelspacing=0.55,
+                     handletextpad=0.6, labelcolor=INK2, borderaxespad=0.3)
+    ttl = ax2.text(0.008, 0.5, "Trolley availability & capacity\nvs. production demand", transform=ax2.transAxes,
+                   fontsize=11.5, fontweight=600, color=INK, ha="left", va="bottom", linespacing=1.25, zorder=9)
+    _place_corner_block(fig, ax, ax2, leg, ttl, phys, arrival_ks)
 
     _draw_shipments(ax_c, s, compact=True)
     fig.align_ylabels([ax, ax_c])
@@ -919,9 +939,9 @@ st.sidebar.markdown("### Scenario controls")
 
 with st.sidebar.expander("Display", expanded=True):
     unit_mode = st.selectbox("Unit format", UNIT_OPTIONS)
-    y_axis_choice = st.select_slider("Trolley axis maximum", options=["Auto"] + list(range(80, 260, 10)),
-                                     value="Auto", help="Top of the left axis (trolleys). Auto leaves 20% "
-                                                        "headroom over the tallest bar.")
+    y_axis_choice = st.select_slider("Trolley axis maximum", options=["Auto"] + list(range(30, 251)),
+                                     value="Auto", help="Top of the left axis (trolleys), in steps of 1. Auto ends "
+                                                        "just above the tallest bar.")
     chart_layout = st.radio("Chart layout", ["Combined", "Split"], horizontal=True,
                             help="Combined: trolleys and capacity on one chart, as in the last review. "
                                  "Split: separate panels.")
