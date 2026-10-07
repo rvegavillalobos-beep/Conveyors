@@ -561,7 +561,7 @@ def _draw_split(s: dict) -> bytes:
     bar_kw = dict(width=0.62, edgecolor=SURFACE, linewidth=1.3, zorder=3)
     ax_b.bar(x, op, color=NAVY, **bar_kw)
     ax_b.bar(x, pending, bottom=op, color=PENDING, **bar_kw)
-    b_top = p.y_max or max(phys.max(), p.trolleys_for_30) * 1.22
+    b_top = p.y_max or phys.max() * 1.22
     ax_b.set_ylim(0, b_top)
     ax_b.yaxis.set_major_locator(MaxNLocator(4, integer=True))
     for k, v in enumerate(op):
@@ -572,11 +572,6 @@ def _draw_split(s: dict) -> bytes:
             ax_b.text(k, v + 0.015 * b_top, str(v), ha="center", va="bottom", fontsize=7.5,
                       fontweight=600, color=INK, zorder=5)
 
-    ax_b.axhline(p.trolleys_for_30, color=INK2, lw=1.0, ls=(0, (3, 3)), zorder=4)
-    ax_b.annotate(f"{p.trolleys_for_30} needed\nfor {UPH_AT_TARGET} UPH",
-                  xy=(1, p.trolleys_for_30), xycoords=("axes fraction", "data"), xytext=(8, 0),
-                  textcoords="offset points", ha="left", va="center", fontsize=8.4, color=INK2,
-                  linespacing=1.25, annotation_clip=False)
 
     for b in s["batches"]:
         k = b.arrival_idx - (WEEK_LABELS.index(weeks[0]))
@@ -589,7 +584,6 @@ def _draw_split(s: dict) -> bytes:
     handles_b = [
         Patch(facecolor=NAVY, label="Operational"),
         Patch(facecolor=PENDING, label="Pending adjustment"),
-        Line2D([0], [0], color=INK2, lw=1.0, ls=(0, (3, 3)), label=f"Needed for {UPH_AT_TARGET} UPH"),
     ]
     _panel_header(ax_b, "Trolley fleet  ·  units", handles_b)
 
@@ -597,9 +591,9 @@ def _draw_split(s: dict) -> bytes:
     return _to_png(fig)
 
 
-def auto_y_max(phys, target: int) -> int:
-    """Automatic trolley-axis maximum: 20% headroom over the tallest bar or the target, rounded up to 10."""
-    return int(np.ceil(max(float(phys.max()), target) * 1.2 / 10.0) * 10)
+def auto_y_max(phys) -> int:
+    """Automatic trolley-axis maximum: 20% headroom over the tallest bar, rounded up to 10."""
+    return int(np.ceil(float(phys.max()) * 1.2 / 10.0) * 10)
 
 
 def _draw_combined(s: dict) -> bytes:
@@ -639,7 +633,7 @@ def _draw_combined(s: dict) -> bytes:
     bar_kw = dict(width=0.62, edgecolor=SURFACE, linewidth=1.3, zorder=2)
     ax.bar(x, op, color=NAVY, **bar_kw)
     ax.bar(x, pending, bottom=op, color=PENDING_SOFT, **bar_kw)
-    l_top = p.y_max or auto_y_max(phys, p.trolleys_for_30)
+    l_top = p.y_max or auto_y_max(phys)
     ax.set_ylabel("Available trolleys", fontsize=9.5, color=INK2, labelpad=8)
     bar_label_y = {}  # week -> (y anchor in trolleys, "top"/"bottom") of the bar's value label
     for k, v in enumerate(op):
@@ -656,10 +650,6 @@ def _draw_combined(s: dict) -> bytes:
         if 0 <= k < n:
             ax.text(k, phys[k] + 0.014 * l_top, f"+{b.qty}", ha="center", va="bottom", fontsize=8.4,
                     fontweight=700, color=INK, zorder=3)
-    ax.axhline(p.trolleys_for_30, color=INK2, lw=1.0, ls=(0, (3, 3)), zorder=2)
-    ax.annotate(f"{p.trolleys_for_30} trolleys needed for {UPH_AT_TARGET} UPH", xy=(-0.42, p.trolleys_for_30),
-                xytext=(0, 3), textcoords="offset points", ha="left", va="bottom", fontsize=8.2,
-                color=INK2, zorder=6)
 
     # ---------------- lines: capacity, demand, scrap (right axis) ----------------
     mask = np.array([d is not None for d in s["demand"]])
@@ -775,7 +765,6 @@ def _draw_combined(s: dict) -> bytes:
     bar_handles = [
         Patch(facecolor=NAVY, label="Operational trolleys"),
         Patch(facecolor=PENDING_SOFT, label="Pending adjustment"),
-        Line2D([0], [0], color=INK2, lw=1.0, ls=(0, (3, 3)), label=f"Needed for {UPH_AT_TARGET} UPH"),
     ]
     line_handles = [
         Line2D([0], [0], color=CAP_LINE, lw=2.2, marker="o", ms=5.5, mfc=CAP_LINE, mec=SURFACE,
@@ -930,7 +919,7 @@ with st.sidebar.expander("Display", expanded=True):
     unit_mode = st.selectbox("Unit format", UNIT_OPTIONS)
     y_axis_choice = st.select_slider("Trolley axis maximum", options=["Auto"] + list(range(80, 260, 10)),
                                      value="Auto", help="Top of the left axis (trolleys). Auto leaves 20% "
-                                                        "headroom over the tallest bar or the 30 UPH target.")
+                                                        "headroom over the tallest bar.")
     chart_layout = st.radio("Chart layout", ["Combined", "Split"], horizontal=True,
                             help="Combined: trolleys and capacity on one chart, as in the last review. "
                                  "Split: separate panels.")
