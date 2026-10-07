@@ -398,7 +398,7 @@ def _draw_shipments(ax_c, s: dict, compact: bool = False) -> None:
         Line2D([0], [0], color="none", marker="D", ms=6.5, mfc=NAVY, mec=SURFACE, label="Fully operational"),
     ]
     if compact:
-        ax_c.set_ylabel("Shipments &\nadjustment", fontsize=9.5, color=INK2, labelpad=10, linespacing=1.3)
+        ax_c.set_ylabel("Shipments", fontsize=9.5, color=INK2, labelpad=10)
         ax_c.legend(handles=handles_c, ncol=len(handles_c), loc="upper right", bbox_to_anchor=(1.0, 0.0),
                     bbox_transform=offset_copy(ax_c.transAxes, fig=ax_c.figure, y=-21, units="points"),
                     frameon=False, fontsize=8.6, handlelength=1.6, handleheight=0.9, columnspacing=1.4,
@@ -446,11 +446,6 @@ def _draw_split(s: dict) -> bytes:
     scrap = np.array([d for d in s["scrap_conv"] if d is not None], dtype=float)
 
     ref_k = s["ref_k"]
-    if ref_k < n - 1:
-        ax_a.axvspan(ref_k + 0.5, n - 0.5, color=NODATA_FILL, zorder=0, lw=0)
-        tr = blended_transform_factory(ax_a.transData, ax_a.transAxes)
-        ax_a.text((ref_k + 0.5 + n - 0.5) / 2, 0.975, f"No demand data after {weeks[ref_k]}",
-                  transform=tr, ha="center", va="top", fontsize=8.2, color=MUTED, zorder=6)
 
     has_short = bool(s["short_weeks"])
     if has_short:
@@ -609,7 +604,7 @@ def _draw_combined(s: dict) -> bytes:
 
     fig = plt.figure(figsize=(FIG_W, 8.4), facecolor=SURFACE)
     gs = fig.add_gridspec(2, 1, height_ratios=[4.1, 0.95], hspace=0.06,
-                          left=LEFT, right=RIGHT, top=0.915, bottom=0.08)
+                          left=LEFT, right=RIGHT, top=0.95, bottom=0.08)
     ax = fig.add_subplot(gs[0])
     ax_c = fig.add_subplot(gs[1], sharex=ax)
     for a in (ax, ax_c):
@@ -621,13 +616,8 @@ def _draw_combined(s: dict) -> bytes:
     ax2.tick_params(axis="y", colors=MUTED, labelsize=8.5, length=0, pad=6)
 
     sd_note = f"adjusting {p.shutdown_rate}/wk" if p.adjust_in_shutdown else "adjustment paused"
-    _shade_shutdown((ax, ax_c), weeks, label_ax=ax, note=sd_note)
+    _shade_shutdown((ax, ax_c), weeks)
     ref_k = s["ref_k"]
-    if ref_k < n - 1:
-        ax.axvspan(ref_k + 0.5, n - 0.5, color=NODATA_FILL, zorder=0, lw=0)
-        tr = blended_transform_factory(ax.transData, ax.transAxes)
-        ax.text((ref_k + 0.5 + n - 0.5) / 2, 0.975, f"No demand data after {weeks[ref_k]}",
-                transform=tr, ha="center", va="top", fontsize=8.2, color=MUTED, zorder=6)
 
     # ---------------- bars: trolleys (left axis) ----------------
     bar_kw = dict(width=0.62, edgecolor=SURFACE, linewidth=1.3, zorder=2)
@@ -645,11 +635,22 @@ def _draw_combined(s: dict) -> bytes:
             ax.text(k, v + 0.012 * l_top, str(v), ha="center", va="bottom", fontsize=7.8,
                     fontweight=600, color=INK, zorder=3)
             bar_label_y[k] = (v + 0.012 * l_top, "bottom")
+    arrival_ks = set()
     for b in s["batches"]:
         k = b.arrival_idx - WEEK_LABELS.index(weeks[0])
         if 0 <= k < n:
+            arrival_ks.add(k)
             ax.text(k, phys[k] + 0.014 * l_top, f"+{b.qty}", ha="center", va="bottom", fontsize=8.4,
                     fontweight=700, color=INK, zorder=3)
+    sd_ks = [k for k, w in enumerate(weeks) if w in SHUTDOWN_WEEKS]
+    if sd_ks:
+        top_k = max(sd_ks, key=lambda k: phys[k])
+        lift = 19 if any(k in arrival_ks for k in sd_ks) else 6  # clear the "+N" label
+        cx = (min(sd_ks) + max(sd_ks)) / 2
+        ax.annotate(sd_note, (cx, phys[top_k]), xytext=(0, lift), textcoords="offset points", ha="center",
+                    va="bottom", fontsize=7.8, color=MUTED, zorder=6)
+        ax.annotate("Shutdown", (cx, phys[top_k]), xytext=(0, lift + 12), textcoords="offset points",
+                    ha="center", va="bottom", fontsize=8.6, fontweight=600, color=INK2, zorder=6)
 
     # ---------------- lines: capacity, demand, scrap (right axis) ----------------
     mask = np.array([d is not None for d in s["demand"]])
@@ -777,12 +778,12 @@ def _draw_combined(s: dict) -> bytes:
                                    mfc=VIOLET, mec=SURFACE, label=f"Scrap ({p.scrap_pct:g}%)"))
     if has_short:
         line_handles.append(Patch(facecolor=CRITICAL, alpha=0.22, label="Shortfall"))
-    ax.text(0, 1.035, "Trolley availability & capacity vs. production demand", transform=ax.transAxes,
+    ax.text(0, 1.025, "Trolley availability & capacity vs. production demand", transform=ax.transAxes,
             fontsize=11.5, fontweight=600, color=INK, ha="left", va="bottom")
-    legend_kw = dict(frameon=False, fontsize=8.6, handlelength=1.8, handleheight=0.9, columnspacing=1.4,
-                     handletextpad=0.5, labelcolor=INK2, borderaxespad=0.2, loc="lower right")
-    ax.legend(handles=bar_handles, ncol=len(bar_handles), bbox_to_anchor=(1.0, 1.052), **legend_kw)
-    ax2.legend(handles=line_handles, ncol=len(line_handles), bbox_to_anchor=(1.0, 1.0), **legend_kw)
+    # One legend for both axes, stacked in the empty top-left corner (as in the previous review).
+    ax2.legend(handles=bar_handles + line_handles, ncol=1, loc="upper left", bbox_to_anchor=(0.0, 1.0),
+               frameon=False, fontsize=8.8, handlelength=1.9, handleheight=0.9, labelspacing=0.55,
+               handletextpad=0.6, labelcolor=INK2, borderaxespad=0.6)
 
     _draw_shipments(ax_c, s, compact=True)
     fig.align_ylabels([ax, ax_c])
