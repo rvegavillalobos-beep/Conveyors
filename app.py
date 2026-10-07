@@ -586,9 +586,9 @@ def _draw_split(s: dict) -> bytes:
     return _to_png(fig)
 
 
-def auto_y_max(phys) -> int:
-    """Automatic trolley-axis maximum: 20% headroom over the tallest bar, rounded up to 10."""
-    return int(np.ceil(float(phys.max()) * 1.2 / 10.0) * 10)
+def auto_y_max(phys) -> float:
+    """Automatic trolley-axis maximum: just enough headroom for the "+N" label on the tallest bar."""
+    return float(phys.max()) * 1.075
 
 
 def _draw_combined(s: dict) -> bytes:
@@ -602,9 +602,9 @@ def _draw_combined(s: dict) -> bytes:
     cap, op, phys = s["cap"], s["op"], s["phys"]
     pending = phys - op
 
-    fig = plt.figure(figsize=(FIG_W, 8.4), facecolor=SURFACE)
+    fig = plt.figure(figsize=(FIG_W, 7.9), facecolor=SURFACE)
     gs = fig.add_gridspec(2, 1, height_ratios=[4.1, 0.95], hspace=0.06,
-                          left=LEFT, right=RIGHT, top=0.95, bottom=0.08)
+                          left=LEFT, right=RIGHT, top=0.985, bottom=0.085)
     ax = fig.add_subplot(gs[0])
     ax_c = fig.add_subplot(gs[1], sharex=ax)
     for a in (ax, ax_c):
@@ -778,10 +778,11 @@ def _draw_combined(s: dict) -> bytes:
                                    mfc=VIOLET, mec=SURFACE, label=f"Scrap ({p.scrap_pct:g}%)"))
     if has_short:
         line_handles.append(Patch(facecolor=CRITICAL, alpha=0.22, label="Shortfall"))
-    ax.text(0, 1.025, "Trolley availability & capacity vs. production demand", transform=ax.transAxes,
-            fontsize=11.5, fontweight=600, color=INK, ha="left", va="bottom")
-    # One legend for both axes, stacked in the empty top-left corner (as in the previous review).
-    ax2.legend(handles=bar_handles + line_handles, ncol=1, loc="upper left", bbox_to_anchor=(0.0, 1.0),
+    # Title and legend live in the empty top-left corner of the plot (above the early, short bars),
+    # so the chart has no empty band on top: its ceiling is the tallest bar.
+    ax2.text(0.008, 0.99, "Trolley availability & capacity vs. production demand", transform=ax.transAxes,
+             fontsize=11.5, fontweight=600, color=INK, ha="left", va="top", zorder=9)
+    ax2.legend(handles=bar_handles + line_handles, ncol=1, loc="upper left", bbox_to_anchor=(0.0, 0.94),
                frameon=False, fontsize=8.8, handlelength=1.9, handleheight=0.9, labelspacing=0.55,
                handletextpad=0.6, labelcolor=INK2, borderaxespad=0.6)
 
