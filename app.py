@@ -145,7 +145,9 @@ class Params:
     scrap_mode: str
     scrap_range: tuple
     chart_layout: str = "combined"
-    chart_height: int = 100  # main chart height, % of the default proportion
+    chart_height: int = 100
+    show_cap: bool = False   # combined chart: capacity line
+    show_dem: bool = False   # combined chart: demand (and scrap) line  # main chart height, % of the default proportion
 
 
 @dataclass
@@ -637,6 +639,9 @@ def _draw_combined(s: dict) -> bytes:
     for side in ("top", "right", "left", "bottom"):
         ax2.spines[side].set_visible(False)
     ax2.tick_params(axis="y", colors=MUTED, labelsize=8.5, length=0, pad=6)
+    show_cap, show_dem = p.show_cap, p.show_dem
+    show_scrap = show_dem and p.scrap_on
+    lines_on = show_cap or show_dem
 
     sd_note = f"adjusting {p.shutdown_rate}/wk" if p.adjust_in_shutdown else "adjustment paused"
     _shade_shutdown((ax_c,), weeks)
@@ -687,7 +692,7 @@ def _draw_combined(s: dict) -> bytes:
     r_top = cap_per_trolley * l_top / CAP_SHARE_OF_BAR
     if dem.size:
         r_top = max(r_top, dem.max() * 1.15)
-    bottom_pad = 0.075 if p.label_all else 0.0  # room under zero for the lowest labels
+    bottom_pad = 0.075 if (p.label_all and lines_on) else 0.0  # room under zero for the lowest line labels
     ax.set_ylim(-bottom_pad * l_top, l_top)
     ax2.set_ylim(-bottom_pad * r_top, r_top)
     sd_cols = [k for k, w in enumerate(weeks) if w in SHUTDOWN_WEEKS]
@@ -699,11 +704,17 @@ def _draw_combined(s: dict) -> bytes:
     if bottom_pad:
         ax.spines["bottom"].set_visible(False)
         ax.axhline(0, color=BASELINE, linewidth=0.9, zorder=2)
-    ax2.set_yticks([t for t in MaxNLocator(5).tick_values(0, r_top) if 0 <= t <= r_top])
-    ax2.yaxis.set_major_formatter(plt.FuncFormatter(lambda v, _: f"{v:,.0f}" if v >= 10 or v == 0 else f"{v:g}"))
-    ax2.set_ylabel(f"Capacity, demand & scrap ({u})", fontsize=9.5, color=INK2, rotation=270, labelpad=16)
+    if lines_on:
+        ax2.set_yticks([t for t in MaxNLocator(5).tick_values(0, r_top) if 0 <= t <= r_top])
+        ax2.yaxis.set_major_formatter(
+            plt.FuncFormatter(lambda v, _: f"{v:,.0f}" if v >= 10 or v == 0 else f"{v:g}"))
+        names = [n for n, on in (("capacity", show_cap), ("demand", show_dem), ("scrap", show_scrap)) if on]
+        axis_label = (", ".join(names[:-1]) + " & " + names[-1]) if len(names) > 1 else names[0]
+        ax2.set_ylabel(f"{axis_label.capitalize()} ({u})", fontsize=9.5, color=INK2, rotation=270, labelpad=16)
+    else:  # bars only: no right axis
+        ax2.set_yticks([])
 
-    has_short = bool(s["short_weeks"])
+    has_short = bool(s["short_weeks"]) and show_cap and show_dem
     if has_short:
         ax2.fill_between(xd, cap[mask], dem, where=dem > cap[mask], interpolate=True,
                          color=CRITICAL, alpha=0.22, lw=0, zorder=1)
@@ -715,9 +726,11 @@ def _draw_combined(s: dict) -> bytes:
         ax2.plot(xs, ys, linestyle="none", marker=marker, markersize=ms, markerfacecolor=color,
                  markeredgecolor=SURFACE, markeredgewidth=1.3, zorder=z + 0.5)
 
-    series_line(x, cap, CAP_LINE, "o", 5.8, 4)
-    series_line(xd, dem, DEM_LINE, "s", 5.2, 5)
-    if p.scrap_on:
+    if show_cap:
+        series_line(x, cap, CAP_LINE, "o", 5.8, 4)
+    if show_dem:
+        series_line(xd, dem, DEM_LINE, "s", 5.2, 5)
+    if show_scrap:
         series_line(xd, scrap, VIOLET, "^", 5.6, 5, lw=1.8, linestyle=(0, (4, 2)), dash_capstyle="butt")
 
     px = fig.dpi / 72.0
@@ -728,14 +741,14 @@ def _draw_combined(s: dict) -> bytes:
 
     # End labels: capacity sits above its last point (the right edge holds the axis);
     # demand / scrap end at the last week with data and are labeled to the right, kept apart.
-    if not p.label_all:
+    if show_cap and not p.label_all:
         ax2.annotate(f"Capacity {fmt(cap[-1], dec)}", (n - 1, cap[-1]), xytext=(4, 9),
                      textcoords="offset points", ha="right", va="bottom", fontsize=9, fontweight=600,
                      color=INK, zorder=8, bbox=chip)
     ends = []
-    if xd.size:
+    if xd.size and show_dem:
         ends.append((xd[-1], dem[-1], f"Demand {fmt(dem[-1], dec)}"))
-        if p.scrap_on:
+        if show_scrap:
             ends.append((xd[-1], scrap[-1], f"Scrap {fmt(scrap[-1], sdec)}"))
     floor = None
     for xv, yv, text in sorted(ends, key=lambda e: e[1]):
@@ -745,10 +758,13 @@ def _draw_combined(s: dict) -> bytes:
         ax2.annotate(text, (xv, yv), xytext=(9, (target - natural) / px), textcoords="offset points",
                      ha="left", va="center", fontsize=9, fontweight=600, color=INK, zorder=8, bbox=chip)
 
-    if p.label_all:
-        series = [(list(cap), lambda v: fmt(v, dec), CAP_LINE_TEXT, set()),
-                  (s["demand"], lambda v: fmt(v, dec), DEM_LINE_TEXT, {ref_k})]
-        if p.scrap_on:
+    if p.label_all and lines_on:
+        series = []
+        if show_cap:
+            series.append((list(cap), lambda v: fmt(v, dec), CAP_LINE_TEXT, set()))
+        if show_dem:
+            series.append((s["demand"], lambda v: fmt(v, dec), DEM_LINE_TEXT, {ref_k}))
+        if show_scrap:
             series.append((s["scrap_conv"], lambda v: fmt(v, sdec), VIOLET, {ref_k}))
         room = (7.4 + 5) * px + 3
         text_h = 7.4 * 1.3 * px
@@ -795,13 +811,14 @@ def _draw_combined(s: dict) -> bytes:
         Patch(facecolor=NAVY, label="Operational trolleys"),
         Patch(facecolor=PENDING_SOFT, label="Pending adjustment"),
     ]
-    line_handles = [
-        Line2D([0], [0], color=CAP_LINE, lw=2.2, marker="o", ms=5.5, mfc=CAP_LINE, mec=SURFACE,
-               label=f"Capacity ({u})"),
-        Line2D([0], [0], color=DEM_LINE, lw=2.2, marker="s", ms=5, mfc=DEM_LINE, mec=SURFACE,
-               label=f"Production demand ({u})"),
-    ]
-    if p.scrap_on:
+    line_handles = []
+    if show_cap:
+        line_handles.append(Line2D([0], [0], color=CAP_LINE, lw=2.2, marker="o", ms=5.5, mfc=CAP_LINE,
+                                   mec=SURFACE, label=f"Capacity ({u})"))
+    if show_dem:
+        line_handles.append(Line2D([0], [0], color=DEM_LINE, lw=2.2, marker="s", ms=5, mfc=DEM_LINE,
+                                   mec=SURFACE, label=f"Production demand ({u})"))
+    if show_scrap:
         line_handles.append(Line2D([0], [0], color=VIOLET, lw=1.8, ls=(0, (4, 2)), marker="^", ms=5.5,
                                    mfc=VIOLET, mec=SURFACE, label=f"Scrap ({p.scrap_pct:g}%)"))
     if has_short:
@@ -811,7 +828,10 @@ def _draw_combined(s: dict) -> bytes:
     leg = ax2.legend(handles=bar_handles + line_handles, ncol=1, loc="lower left", bbox_to_anchor=(0.0, 0.5),
                      frameon=False, fontsize=8.8, handlelength=1.9, handleheight=0.9, labelspacing=0.55,
                      handletextpad=0.6, labelcolor=INK2, borderaxespad=0.3)
-    ttl = ax2.text(0.008, 0.5, "Trolley availability & capacity\nvs. production demand", transform=ax2.transAxes,
+    title = ("Trolley availability & capacity\nvs. production demand" if show_cap and show_dem else
+             "Trolley availability & capacity" if show_cap else
+             "Trolley availability\nvs. production demand" if show_dem else "Trolley availability")
+    ttl = ax2.text(0.008, 0.5, title, transform=ax2.transAxes,
                    fontsize=11.5, fontweight=600, color=INK, ha="left", va="bottom", linespacing=1.25, zorder=9)
     _place_corner_block(fig, ax, ax2, leg, ttl, phys, arrival_ks)
 
@@ -954,6 +974,11 @@ with st.sidebar.expander("Display", expanded=True):
     chart_layout = st.radio("Chart layout", ["Combined", "Split"], horizontal=True,
                             help="Combined: trolleys and capacity on one chart, as in the last review. "
                                  "Split: separate panels.")
+    split_view = chart_layout == "Split"
+    show_cap = st.toggle("Capacity line", value=False, disabled=split_view,
+                         help="Combined chart only. Off: the chart shows the trolley bars alone.")
+    show_dem = st.toggle("Demand line", value=False, disabled=split_view,
+                         help="Combined chart only (also carries the scrap line when scrap is on).")
     label_all = st.checkbox("Label every data point", value=False,
                             help="Off: only the key call-outs are labeled (cleaner for presenting).")
 
@@ -1003,7 +1028,7 @@ params = Params(
     b2_qty=int(batch2_qty), b2_ship=batch2_start_week, b2_customs=int(batch2_customs),
     scrap_on=bool(enable_scrap), scrap_pct=float(scrap_pct), scrap_mode=scrap_mode,
     scrap_range=tuple(scrap_range), chart_layout=chart_layout.lower(),
-    chart_height=int(chart_height),
+    chart_height=int(chart_height), show_cap=bool(show_cap), show_dem=bool(show_dem),
 )
 s = build_scenario(params)
 CODE_VERSION = hashlib.md5(Path(__file__).read_bytes()).hexdigest()
