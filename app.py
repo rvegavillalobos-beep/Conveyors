@@ -974,13 +974,20 @@ with st.sidebar.expander("Display", expanded=True):
     chart_layout = st.radio("Chart layout", ["Combined", "Split"], horizontal=True,
                             help="Combined: trolleys and capacity on one chart, as in the last review. "
                                  "Split: separate panels.")
-    split_view = chart_layout == "Split"
-    show_cap = st.toggle("Capacity line", value=False, disabled=split_view,
-                         help="Combined chart only. Off: the chart shows the trolley bars alone.")
-    show_dem = st.toggle("Demand line", value=False, disabled=split_view,
-                         help="Combined chart only (also carries the scrap line when scrap is on).")
     label_all = st.checkbox("Label every data point", value=False,
                             help="Off: only the key call-outs are labeled (cleaner for presenting).")
+
+with st.sidebar.expander("Capacity & demand lines", expanded=True):
+    split_view = chart_layout == "Split"
+    show_lines = st.toggle("Show lines", value=False, disabled=split_view,
+                           help="Off: the chart shows the trolley bars alone. "
+                                "The split layout always shows its lines.")
+    line_choice = st.radio("Lines on the chart", ["Capacity & demand", "Capacity only", "Demand only"],
+                           disabled=split_view or not show_lines,
+                           help="The demand line also carries the scrap line when scrap is on.")
+    lines_active = show_lines and not split_view
+    show_cap = lines_active and line_choice != "Demand only"
+    show_dem = lines_active and line_choice != "Capacity only"
 
 with st.sidebar.expander("Fleet & adjustment", expanded=True):
     base_fleet = st.number_input("Base fleet (trolleys today)", min_value=20, max_value=60, value=36, step=1)
